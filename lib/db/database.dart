@@ -175,7 +175,6 @@ CREATE TABLE settings (
     await db.execute('CREATE INDEX idx_products_business ON products(business_id)');
 
     // Built-in templates
-    final now = DateTime.now().millisecondsSinceEpoch;
     for (final t in [
       ['INVOICE', 'A4'], ['RECEIPT', '80MM'], ['QUOTATION', 'A4'], ['LETTER', 'A4']
     ]) {

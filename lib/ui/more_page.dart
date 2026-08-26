@@ -163,7 +163,8 @@ class _MorePageState extends State<MorePage> {
           content: Text('Summary saved: ${file.path}'),
           action: SnackBarAction(
               label: 'Share',
-              onPressed: () => Share.shareXFiles([XFile(file.path)]))));
+              onPressed: () => SharePlus.instance
+                  .share(ShareParams(files: [XFile(file.path)])))));
     }
   }
 

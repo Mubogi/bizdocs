@@ -47,7 +47,8 @@ class _OutboxPageState extends State<OutboxPage> {
       return;
     }
     final text = '${docTypeLabel(doc.docType)} ${doc.docNumber}';
-    await Share.shareXFiles([XFile(path)], text: text);
+    await SharePlus.instance
+        .share(ShareParams(files: [XFile(path)], text: text));
     await db.markOutbox(e, 'SENT');
     _refresh();
   }
