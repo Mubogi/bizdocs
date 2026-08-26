@@ -7,6 +7,46 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'models.dart';
 
+// Customer-facing labels translated for Luganda (lg) and Kiswahili (sw).
+const Map<String, Map<String, String>> _pdfStrings = {
+  'lg': {
+    'Invoice': 'Invoice',
+    'Receipt': 'Risiti',
+    'Quotation': 'Okutebenkera emiwendo',
+    'Estimate': 'Okutebenkera',
+    'Proforma Invoice': 'Proforma Invoice',
+    'Delivery Note': 'Lupapula olutwala ebintu',
+    'E-Receipt (URA)': 'E-Risiti (URA)',
+    'Payment Reminder': 'Okujjukiza okusasula',
+    'Letter': 'Ebbaluwa',
+    'TOTAL': 'OMUGATIKKO',
+    'Subtotal': 'Omugattiko ogw\'oluse',
+    'Tax': 'Omusolo',
+    'Discount': 'Okukendeezwa',
+    'Amount in words': 'Mu bigambo',
+    'Payment details': 'Enkola y\'okusasula',
+  },
+  'sw': {
+    'Invoice': 'Ankara',
+    'Receipt': 'Risiti',
+    'Quotation': 'Makadirio ya bei',
+    'Estimate': 'Makadirio',
+    'Proforma Invoice': 'Ankara ya Proforma',
+    'Delivery Note': 'Noti ya Uwasilishaji',
+    'E-Receipt (URA)': 'Risiti ya Kielektroniki (URA)',
+    'Payment Reminder': 'Kikumbusho cha Malipo',
+    'Letter': 'Barua',
+    'TOTAL': 'JUMLA',
+    'Subtotal': 'Jumla ndogo',
+    'Tax': 'Kodi',
+    'Discount': 'Punguzo',
+    'Amount in words': 'Kwa maneno',
+    'Payment details': 'Maelezo ya malipo',
+  },
+};
+
+String _tr(String label, String lang) => _pdfStrings[lang]?[label] ?? label;
+
 class PdfTheme {
   final int accent;
   PdfTheme({this.accent = 0xFF0F7A3D});
@@ -45,10 +85,14 @@ Future<Uint8List> documentPdfBytes({
       ? await File(business.logoPath!).readAsBytes()
       : null;
 
-  final isReceipt = doc.docType == DocType.receipt;
+  final narrow = (doc.docType == DocType.receipt ||
+      doc.docType == DocType.uraReceipt);
   final isLetter = doc.docType == DocType.letter;
-  final isQuotation = doc.docType == DocType.quotation;
-  final pageFormat = isReceipt
+  final isReminder = doc.docType == DocType.reminder;
+  final isQuotation = doc.docType == DocType.quotation ||
+      doc.docType == DocType.estimate ||
+      doc.docType == DocType.proforma;
+  final pageFormat = narrow
       ? PdfPageFormat(80 * PdfPageFormat.mm, 210 * PdfPageFormat.mm,
           marginAll: 6 * PdfPageFormat.mm)
       : PdfPageFormat.a4.copyWith(
@@ -56,7 +100,7 @@ Future<Uint8List> documentPdfBytes({
 
   final df = DateFormat('dd MMM yyyy');
   final accent = PdfColor.fromInt(theme.accent);
-  final isMinimalLayout = isReceipt;
+  final isMinimalLayout = narrow;
 
   final headingFontSize = isMinimalLayout ? 11.0 : 20.0;
   final baseFontSize = isMinimalLayout ? 8.0 : 10.0;
@@ -115,7 +159,7 @@ Future<Uint8List> documentPdfBytes({
                     style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
             ])),
             pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-              pw.Text(docTypeLabel(doc.docType).toUpperCase(),
+              pw.Text(_tr(docTypeLabel(doc.docType), business.language).toUpperCase(),
                   style: pw.TextStyle(
                       fontSize: isMinimalLayout ? 11 : (isQuotation ? 16 : 18),
                       fontWeight: pw.FontWeight.bold,
@@ -159,7 +203,7 @@ Future<Uint8List> documentPdfBytes({
     ],
   ];
 
-  if (isLetter) {
+  if (isLetter || isReminder) {
     widgets.addAll([
       pw.Expanded(
           child: pw.Container(
@@ -167,6 +211,21 @@ Future<Uint8List> documentPdfBytes({
               padding: pw.EdgeInsets.all(isMinimalLayout ? 4 : 12),
               child: pw.Text(doc.content ?? '', style: pw.TextStyle(fontSize: baseFontSize + 1, height: 1.5)))),
     ]);
+    if (doc.total > 0 && isReminder) {
+      widgets.addAll([
+        pw.SizedBox(height: 8),
+        pw.Container(
+            padding: const pw.EdgeInsets.all(8),
+            decoration: pw.BoxDecoration(
+              color: _lighten(accent, 0.9),
+              border: pw.Border.all(color: accent, width: 0.5),
+              borderRadius: pw.BorderRadius.circular(3)),
+            child: pw.Text(
+                'Amount outstanding: ${doc.currency} ${_fmtMoney(doc.total - (doc.chargeTotal - doc.discountTotal))}',
+                style: pw.TextStyle(
+                    fontSize: baseFontSize, fontWeight: pw.FontWeight.bold))),
+      ]);
+    }
   } else {
     // Items table
     widgets.addAll([
@@ -231,17 +290,25 @@ Future<Uint8List> documentPdfBytes({
             children: [
               pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
                 pw.Padding(padding: pw.EdgeInsets.symmetric(vertical: 4, horizontal: isMinimalLayout ? 2 : 8),
-                    child: pw.Text('Subtotal: ${_fmtMoney(doc.subtotal)}',
+                    child: pw.Text('${_tr('Subtotal', business.language)}: ${_fmtMoney(doc.subtotal)}',
                         style: pw.TextStyle(fontSize: baseFontSize))),
                 if (doc.taxTotal > 0)
                   pw.Padding(padding: pw.EdgeInsets.symmetric(vertical: 4, horizontal: isMinimalLayout ? 2 : 8),
-                      child: pw.Text('Tax: ${_fmtMoney(doc.taxTotal)}',
+                      child: pw.Text('${_tr('Tax', business.language)}: ${_fmtMoney(doc.taxTotal)}',
+                          style: pw.TextStyle(fontSize: baseFontSize))),
+                if (doc.discountTotal > 0)
+                  pw.Padding(padding: pw.EdgeInsets.symmetric(vertical: 4, horizontal: isMinimalLayout ? 2 : 8),
+                      child: pw.Text('${_tr('Discount', business.language)}: -${_fmtMoney(doc.discountTotal)}',
+                          style: pw.TextStyle(fontSize: baseFontSize))),
+                if (doc.chargeTotal > 0)
+                  pw.Padding(padding: pw.EdgeInsets.symmetric(vertical: 4, horizontal: isMinimalLayout ? 2 : 8),
+                      child: pw.Text('Charges: +${_fmtMoney(doc.chargeTotal)}',
                           style: pw.TextStyle(fontSize: baseFontSize))),
                 pw.Container(
                     padding: pw.EdgeInsets.all(isMinimalLayout ? 3 : 6),
                     color: accent,
                     child: pw.Text(
-                        'TOTAL: ${business.currency} ${_fmtMoney(doc.total)}',
+                        '${_tr('TOTAL', business.language)}: ${doc.currency} ${_fmtMoney(doc.total)}',
                         style: pw.TextStyle(
                             fontSize: isMinimalLayout ? 9 : 13, fontWeight: pw.FontWeight.bold, color: PdfColors.white))),
               ]),
@@ -263,7 +330,7 @@ Future<Uint8List> documentPdfBytes({
             border: pw.Border(
                 left: pw.BorderSide(color: accent, width: 3))),
         child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          pw.Text('Payment details',
+          pw.Text(_tr('Payment details', business.language),
               style: pw.TextStyle(
                   fontSize: tinyFontSize, color: accent, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 2),
@@ -271,6 +338,47 @@ Future<Uint8List> documentPdfBytes({
             pw.Text(line, style: pw.TextStyle(fontSize: smallFontSize)),
         ])));
     widgets.add(pw.SizedBox(height: isMinimalLayout ? 3 : 8));
+  }
+
+  if (!isLetter && doc.total > 0) {
+    widgets.addAll([
+      pw.SizedBox(height: isMinimalLayout ? 3 : 8),
+      pw.Container(
+          width: double.infinity,
+          padding: pw.EdgeInsets.all(isMinimalLayout ? 3 : 8),
+          decoration: pw.BoxDecoration(
+              color: _lighten(accent, 0.92),
+              borderRadius: pw.BorderRadius.circular(3)),
+          child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(_tr('Amount in words', business.language),
+                    style: pw.TextStyle(fontSize: tinyFontSize, color: accent, fontWeight: pw.FontWeight.bold)),
+                pw.Text('${wordsToEnglish(doc.total)} ${doc.currency == 'UGX' ? 'Shillings' : doc.currency} only',
+                    style: pw.TextStyle(fontSize: smallFontSize)),
+              ])),
+      pw.SizedBox(height: isMinimalLayout ? 3 : 8),
+    ]);
+  }
+
+  final terms = (doc.terms != null && doc.terms!.isNotEmpty)
+      ? doc.terms
+      : business.termsTemplate;
+  if (!isLetter && terms != null && terms.isNotEmpty) {
+    widgets.addAll([
+      pw.Container(
+          width: double.infinity,
+          padding: pw.EdgeInsets.all(isMinimalLayout ? 3 : 8),
+          decoration: pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.5))),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text('Terms & conditions',
+                style: pw.TextStyle(fontSize: tinyFontSize, color: PdfColors.grey600, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 2),
+            pw.Text(terms, style: pw.TextStyle(fontSize: smallFontSize, color: PdfColors.grey700)),
+          ])),
+      pw.SizedBox(height: isMinimalLayout ? 3 : 8),
+    ]);
   }
 
   if (signaturePng != null) {
@@ -312,6 +420,21 @@ Future<Uint8List> documentPdfBytes({
   final pdf = pw.Document();
   pdf.addPage(pw.Page(pageFormat: pageFormat, build: (ctx) => pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start, children: widgets)));
+
+  // Attachment photos print as full pages after the document.
+  if (doc.attachmentsJson != null && doc.attachmentsJson!.isNotEmpty) {
+    try {
+      final paths = List<dynamic>.from(jsonDecode(doc.attachmentsJson!));
+      for (final p in paths) {
+        final f = File(p.toString());
+        if (!f.existsSync()) continue;
+        final img = pw.MemoryImage(await f.readAsBytes());
+        pdf.addPage(pw.Page(
+            pageFormat: PdfPageFormat.a4,
+            build: (ctx) => pw.Center(child: pw.Image(img, fit: pw.BoxFit.contain))));
+      }
+    } catch (_) {}
+  }
   return pdf.save();
 }
 

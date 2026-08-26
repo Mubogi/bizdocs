@@ -32,6 +32,8 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
   final _momoNumber = TextEditingController();
   final _momoProvider = TextEditingController();
   final _merchantCode = TextEditingController();
+  final _terms = TextEditingController();
+  String _language = 'en';
 
   int _accent = 0xFF0F7A3D; // green default
 
@@ -55,6 +57,8 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
       _momoNumber.text = b.mobileMoneyNumber ?? '';
       _momoProvider.text = b.mobileMoneyProvider ?? '';
       _merchantCode.text = b.merchantCode ?? '';
+      _terms.text = b.termsTemplate ?? '';
+      _language = b.language;
       if (b.templateJson != null) {
         try {
           _accent = (jsonDecode(b.templateJson!)['accent'] as num?)?.toInt() ?? _accent;
@@ -108,6 +112,8 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           _momoProvider.text.trim().isEmpty ? null : _momoProvider.text.trim(),
       merchantCode:
           _merchantCode.text.trim().isEmpty ? null : _merchantCode.text.trim(),
+      termsTemplate: _terms.text.trim().isEmpty ? null : _terms.text.trim(),
+      language: _language,
       templateJson: jsonEncode({'accent': _accent}),
       currency: _currency.text.trim().isEmpty ? 'UGX' : _currency.text.trim(),
       defaultTaxPercent: double.tryParse(_tax.text.trim()) ?? 0,
@@ -156,7 +162,13 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           TextFormField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
           const SizedBox(height: 16),
           _section(context, 'Presentation'),
-          TextFormField(controller: _currency, decoration: const InputDecoration(labelText: 'Currency')),
+          DropdownButtonFormField<String>(
+              value: _accCurrencies.contains(_currency.text) ? _currency.text : 'UGX',
+              decoration: const InputDecoration(labelText: 'Currency'),
+              items: _accCurrencies
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
+              onChanged: (v) => setState(() => _currency.text = v ?? 'UGX')),
           const SizedBox(height: 8),
           TextFormField(controller: _tax,
               decoration: const InputDecoration(labelText: 'Default tax %'),
@@ -190,6 +202,24 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           const SizedBox(height: 8),
           TextFormField(controller: _merchantCode,
               decoration: const InputDecoration(labelText: 'Merchant code (from aggregator)')),
+          const SizedBox(height: 16),
+          _section(context, 'Documents'),
+          DropdownButtonFormField<String>(
+              value: _language,
+              decoration: const InputDecoration(labelText: 'App language'),
+              items: const [
+                DropdownMenuItem(value: 'en', child: Text('English')),
+                DropdownMenuItem(value: 'lg', child: Text('Luganda')),
+                DropdownMenuItem(value: 'sw', child: Text('Kiswahili')),
+              ],
+              onChanged: (v) => setState(() => _language = v ?? 'en')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _terms,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                  labelText: 'Terms & conditions (prints on every document)',
+                  hintText: 'e.g. Payment due within 30 days. Goods remain property of seller until paid in full.',
+                  alignLabelWithHint: true)),
           const SizedBox(height: 24),
           FilledButton.icon(onPressed: _save, icon: const Icon(Icons.check), label: const Text('Save settings')),
         ]),
@@ -210,5 +240,9 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
     0xFF7C3AED, // purple
     0xFFB45309, // orange
     0xFF111827, // black
+  ];
+
+  static const List<String> _accCurrencies = [
+    'UGX', 'KES', 'TZS', 'RWF', 'NGN', 'ZAR', 'USD', 'EUR', 'GBP'
   ];
 }

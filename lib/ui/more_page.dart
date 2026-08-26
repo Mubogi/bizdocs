@@ -9,6 +9,7 @@ import '../db/database.dart';
 import '../models.dart';
 import 'business_setup_page.dart';
 import 'outbox_page.dart';
+import 'reports_page.dart';
 
 class MorePage extends StatefulWidget {
   final Business business;
@@ -198,6 +199,12 @@ class _MorePageState extends State<MorePage> {
             subtitle: Text('${widget.business.currency} · Default tax ${widget.business.defaultTaxPercent}%'),
             trailing: IconButton(onPressed: _editBusiness, icon: const Icon(Icons.edit_outlined))),
         ListTile(
+            leading: const Icon(Icons.insights),
+            title: const Text('Reports & tools'),
+            subtitle: const Text('P&L, aging, expenses, recurring, statements, backup'),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ReportsPage(business: widget.business)))),
+        ListTile(
             leading: const Icon(Icons.ios_share),
             title: const Text('Send queue'),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OutboxPage()))),
@@ -221,7 +228,7 @@ class _MorePageState extends State<MorePage> {
         const AboutListTile(
             icon: Icon(Icons.info_outline),
             applicationName: 'BizDocs',
-            applicationVersion: '1.0.0',
+            applicationVersion: '1.2.0',
             aboutBoxChildren: [
               Text('Offline-first invoicing, receipts, quotations and letters for SMEs.'),
             ]),

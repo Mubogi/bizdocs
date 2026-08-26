@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/database.dart';
 import '../models.dart';
+import 'scan_page.dart';
 
 class ProductsPage extends StatefulWidget {
   final Business business;
@@ -82,8 +83,10 @@ class _ProductSheetState extends State<ProductSheet> {
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _sku = TextEditingController();
+  final _barcode = TextEditingController();
   final _description = TextEditingController();
   final _price = TextEditingController();
+  final _cost = TextEditingController();
   final _tax = TextEditingController();
   bool _track = false;
   final _stock = TextEditingController();
@@ -95,14 +98,22 @@ class _ProductSheetState extends State<ProductSheet> {
     if (p != null) {
       _name.text = p.name;
       _sku.text = p.sku ?? '';
+      _barcode.text = p.barcode ?? '';
       _description.text = p.description ?? '';
       _price.text = p.unitPrice.toString();
+      _cost.text = p.costPrice?.toString() ?? '';
       _tax.text = p.taxPercent?.toString() ?? '';
       _track = p.trackStock;
       _stock.text = p.stockQty?.toString() ?? '';
     } else if (widget.defaultTax > 0) {
       _tax.text = widget.defaultTax.toString();
     }
+  }
+
+  Future<void> _scanBarcode() async {
+    final code = await Navigator.of(context)
+        .push<String>(MaterialPageRoute(builder: (_) => const ScanPage()));
+    if (code != null && mounted) setState(() => _barcode.text = code);
   }
 
   Future<void> _save() async {
@@ -114,8 +125,12 @@ class _ProductSheetState extends State<ProductSheet> {
       businessId: old?.businessId ?? widget.businessId,
       name: _name.text.trim(),
       sku: _sku.text.trim().isEmpty ? null : _sku.text.trim(),
+      barcode: _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
       unitPrice: int.tryParse(_price.text.replaceAll(RegExp(r'[,\s]'), '')) ?? 0,
+      costPrice: _cost.text.trim().isEmpty
+          ? null
+          : int.tryParse(_cost.text.replaceAll(RegExp(r'[,\s]'), '')),
       taxPercent: _tax.text.trim().isEmpty ? null : double.tryParse(_tax.text.trim()),
       trackStock: _track,
       stockQty: _track ? double.tryParse(_stock.text.trim()) : null,
@@ -143,11 +158,24 @@ class _ProductSheetState extends State<ProductSheet> {
           const SizedBox(height: 8),
           TextFormField(controller: _sku, decoration: const InputDecoration(labelText: 'SKU')),
           const SizedBox(height: 8),
+          TextFormField(
+              controller: _barcode,
+              decoration: InputDecoration(
+                  labelText: 'Barcode',
+                  suffixIcon: IconButton(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      onPressed: _scanBarcode))),
+          const SizedBox(height: 8),
           TextFormField(controller: _description, decoration: const InputDecoration(labelText: 'Description')),
           const SizedBox(height: 8),
           TextFormField(
               controller: _price,
               decoration: const InputDecoration(labelText: 'Unit price'),
+              keyboardType: TextInputType.number),
+          const SizedBox(height: 8),
+          TextFormField(
+              controller: _cost,
+              decoration: const InputDecoration(labelText: 'Cost price (for profit)'),
               keyboardType: TextInputType.number),
           const SizedBox(height: 8),
           TextFormField(controller: _tax, decoration: const InputDecoration(labelText: 'Tax %')),

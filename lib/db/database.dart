@@ -14,17 +14,72 @@ class AppDatabase {
   Future<Database> get db async {
     _db ??= await openDatabase(
       join(await getDatabasesPath(), 'bizdocs.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, v) async => _createSchema(db),
       onUpgrade: (db, oldVersion, newVersion) async {
-        for (final col in [
-          'logo_path TEXT',
-          'bank_name TEXT', 'bank_account_name TEXT', 'bank_account_no TEXT',
-          'mobile_money_number TEXT', 'mobile_money_provider TEXT',
-          'merchant_code TEXT', 'template_json TEXT'
+        final alters = <String>[
+          "ALTER TABLE businesses ADD COLUMN logo_path TEXT",
+          "ALTER TABLE businesses ADD COLUMN bank_name TEXT",
+          "ALTER TABLE businesses ADD COLUMN bank_account_name TEXT",
+          "ALTER TABLE businesses ADD COLUMN bank_account_no TEXT",
+          "ALTER TABLE businesses ADD COLUMN mobile_money_number TEXT",
+          "ALTER TABLE businesses ADD COLUMN mobile_money_provider TEXT",
+          "ALTER TABLE businesses ADD COLUMN merchant_code TEXT",
+          "ALTER TABLE businesses ADD COLUMN template_json TEXT",
+          "ALTER TABLE businesses ADD COLUMN language TEXT DEFAULT 'en'",
+          "ALTER TABLE businesses ADD COLUMN terms_template TEXT",
+          "ALTER TABLE customers ADD COLUMN email TEXT",
+          "ALTER TABLE customers ADD COLUMN address TEXT",
+          "ALTER TABLE customers ADD COLUMN tin TEXT",
+          "ALTER TABLE products ADD COLUMN barcode TEXT",
+          "ALTER TABLE products ADD COLUMN cost_price INTEGER",
+          "ALTER TABLE documents ADD COLUMN discount_total INTEGER DEFAULT 0",
+          "ALTER TABLE documents ADD COLUMN charge_total INTEGER DEFAULT 0",
+          "ALTER TABLE documents ADD COLUMN currency TEXT DEFAULT 'UGX'",
+          "ALTER TABLE documents ADD COLUMN convert_to TEXT",
+          "ALTER TABLE documents ADD COLUMN terms TEXT",
+          "ALTER TABLE documents ADD COLUMN attachments_json TEXT",
+          "ALTER TABLE document_items ADD COLUMN discount_percent REAL",
+          "ALTER TABLE document_items ADD COLUMN discount_amount INTEGER",
+        ];
+        for (final a in alters) {
+          try {
+            await db.execute(a);
+          } catch (_) {}
+        }
+        // create new tables
+        for (final c in [
+          """CREATE TABLE IF NOT EXISTS expenses (
+               id TEXT PRIMARY KEY,
+               business_id TEXT NOT NULL,
+               narration TEXT NOT NULL,
+               amount INTEGER NOT NULL,
+               category TEXT NOT NULL,
+               currency TEXT DEFAULT 'UGX',
+               doc_id TEXT,
+               expense_at INTEGER NOT NULL,
+               created_at INTEGER NOT NULL)""",
+          """CREATE TABLE IF NOT EXISTS doc_series (
+               business_id TEXT NOT NULL,
+               doc_type TEXT NOT NULL,
+               next_number INTEGER DEFAULT 1,
+               prefix TEXT NOT NULL,
+               PRIMARY KEY (business_id, doc_type))""",
+          """CREATE TABLE IF NOT EXISTS recurring_invoices (
+               id TEXT PRIMARY KEY,
+               business_id TEXT NOT NULL,
+               customer_id TEXT,
+               doc_type TEXT NOT NULL,
+               items_json TEXT NOT NULL,
+               currency TEXT DEFAULT 'UGX',
+               amount INTEGER NOT NULL,
+               interval_days INTEGER DEFAULT 30,
+               next_due INTEGER NOT NULL,
+               active INTEGER DEFAULT 1,
+               created_at INTEGER NOT NULL)""",
         ]) {
           try {
-            await db.execute('ALTER TABLE businesses ADD COLUMN $col');
+            await db.execute(c);
           } catch (_) {}
         }
       },
@@ -51,6 +106,8 @@ CREATE TABLE businesses (
   merchant_code TEXT,
   template_json TEXT,
   currency TEXT DEFAULT 'UGX',
+  language TEXT DEFAULT 'en',
+  terms_template TEXT,
   default_tax_percent REAL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -74,8 +131,10 @@ CREATE TABLE products (
   business_id TEXT NOT NULL REFERENCES businesses(id),
   name TEXT NOT NULL,
   sku TEXT,
+  barcode TEXT,
   description TEXT,
   unit_price INTEGER NOT NULL,
+  cost_price INTEGER,
   tax_percent REAL,
   track_stock INTEGER DEFAULT 0,
   stock_qty REAL,
@@ -112,8 +171,14 @@ CREATE TABLE documents (
   due_date INTEGER,
   subtotal INTEGER NOT NULL DEFAULT 0,
   tax_total INTEGER NOT NULL DEFAULT 0,
+  discount_total INTEGER NOT NULL DEFAULT 0,
+  charge_total INTEGER NOT NULL DEFAULT 0,
   total INTEGER NOT NULL DEFAULT 0,
   template_id TEXT,
+  currency TEXT DEFAULT 'UGX',
+  convert_to TEXT,
+  terms TEXT,
+  attachments_json TEXT,
   pdf_path TEXT,
   hash TEXT,
   linked_doc_id TEXT,
@@ -131,8 +196,44 @@ CREATE TABLE document_items (
   description TEXT NOT NULL,
   quantity REAL NOT NULL,
   unit_price INTEGER NOT NULL,
+  discount_percent REAL,
+  discount_amount INTEGER,
   tax_percent REAL,
   line_total INTEGER NOT NULL
+)''');
+    await db.execute('''
+CREATE TABLE expenses (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL,
+  narration TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  category TEXT NOT NULL,
+  currency TEXT DEFAULT 'UGX',
+  doc_id TEXT,
+  expense_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+)''');
+    await db.execute('''
+CREATE TABLE doc_series (
+  business_id TEXT NOT NULL,
+  doc_type TEXT NOT NULL,
+  next_number INTEGER DEFAULT 1,
+  prefix TEXT NOT NULL,
+  PRIMARY KEY (business_id, doc_type)
+)''');
+    await db.execute('''
+CREATE TABLE recurring_invoices (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL,
+  customer_id TEXT,
+  doc_type TEXT NOT NULL,
+  items_json TEXT NOT NULL,
+  currency TEXT DEFAULT 'UGX',
+  amount INTEGER NOT NULL,
+  interval_days INTEGER DEFAULT 30,
+  next_due INTEGER NOT NULL,
+  active INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL
 )''');
     await db.execute('''
 CREATE TABLE payments (
@@ -195,7 +296,9 @@ CREATE TABLE settings (
 
     // Built-in templates
     for (final t in [
-      ['INVOICE', 'A4'], ['RECEIPT', '80MM'], ['QUOTATION', 'A4'], ['LETTER', 'A4']
+      ['INVOICE', 'A4'], ['RECEIPT', '80MM'], ['QUOTATION', 'A4'], ['LETTER', 'A4'],
+      ['ESTIMATE', 'A4'], ['DELIVERYNOTE', 'A4'], ['PROFORMA', 'A4'],
+      ['URARECEIPT', '80MM'], ['REMINDER', 'A4']
     ]) {
       final docType = t[0];
       final paper = t[1];
@@ -239,6 +342,15 @@ CREATE TABLE settings (
   Future<void> deleteCustomer(String id) async =>
       (await db).delete('customers', where: 'id = ?', whereArgs: [id]);
 
+  Future<int> customerBalance(String customerId) async {
+    final docRows = await (await db).rawQuery(
+        "SELECT COALESCE(SUM(total), 0) as outstanding "
+        "FROM documents WHERE customer_id = ? AND status IN ('ISSUED','PARTIAL')",
+        [customerId]);
+    final totalOutstanding = (docRows.first['outstanding'] as num).toInt();
+    return totalOutstanding;
+  }
+
   Future<List<Product>> listProducts(String businessId) async {
     final rows = await (await db)
         .query('products', where: 'business_id = ?', whereArgs: [businessId], orderBy: 'name');
@@ -253,6 +365,115 @@ CREATE TABLE settings (
 
   Future<void> deleteProduct(String id) async =>
       (await db).delete('products', where: 'id = ?', whereArgs: [id]);
+
+  // ------------------ Expenses ------------------
+
+  Future<void> addExpense(Expense e) async {
+    await (await db).insert('expenses', e.toMap());
+  }
+
+  Future<List<Expense>> listExpenses(String businessId) async {
+    final rows = await (await db).query('expenses',
+        where: 'business_id = ?', whereArgs: [businessId],
+        orderBy: 'expense_at DESC');
+    return rows.map(Expense.fromMap).toList();
+  }
+
+  Future<int> totalExpenses(String businessId,
+      {int? fromMillis, int? toMillis}) async {
+    final where = StringBuffer('business_id = ?');
+    final args = <dynamic>[businessId];
+    if (fromMillis != null) {
+      where.write(' AND expense_at >= ?');
+      args.add(fromMillis);
+    }
+    if (toMillis != null) {
+      where.write(' AND expense_at < ?');
+      args.add(toMillis);
+    }
+    final rows = await (await db).rawQuery(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM expenses "
+        "WHERE ${where.toString()}",
+        args);
+    return (rows.first['total'] as num).toInt();
+  }
+
+  // ------------------ Recurring invoices ------------------
+
+  Future<List<RecurringInvoice>> listRecurringInvoices(String businessId) async {
+    final rows = await (await db).query('recurring_invoices',
+        where: 'business_id = ? AND active = 1', whereArgs: [businessId],
+        orderBy: 'next_due ASC');
+    return rows.map(RecurringInvoice.fromMap).toList();
+  }
+
+  Future<void> upsertRecurringInvoice(RecurringInvoice r) async {
+    await (await db).insert('recurring_invoices', r.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> deleteRecurringInvoice(String id) async => (await db)
+      .delete('recurring_invoices', where: 'id = ?', whereArgs: [id]);
+
+  // ------------------ Aging ------------------
+
+  Future<Map<String, int>> agingReport(String businessId) async {
+    final rows = await (await db).rawQuery("""
+      SELECT d.id, d.customer_id, d.due_date, d.total,
+             COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.document_id = d.id), 0) as paid
+      FROM documents d
+      WHERE d.business_id = ? AND d.status IN ('ISSUED','PARTIAL')""",
+        [businessId]);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final buckets = {'0-30': 0, '31-60': 0, '61-90': 0, '90+': 0, 'total': 0};
+    for (final r in rows) {
+      final outstanding = (r['total'] as num).toInt() - (r['paid'] as num).toInt();
+      if (outstanding <= 0) continue;
+      final days = ((now - ((r['due_date'] as num?)?.toInt() ?? now)) /
+          (24 * 3600 * 1000)).floor();
+      final key = days <= 30
+          ? '0-30'
+          : days <= 60
+              ? '31-60'
+              : days <= 90
+                  ? '61-90'
+                  : '90+';
+      buckets[key] = (buckets[key] ?? 0) + outstanding;
+      buckets['total'] = (buckets['total'] ?? 0) + outstanding;
+    }
+    return buckets;
+  }
+
+  // ------------------ P&L ------------------
+
+  Future<Map<String, int>> pnl(String businessId,
+      {int? fromMillis, int? toMillis}) async {
+    final salesRows = await (await db).rawQuery("""
+      SELECT COALESCE(SUM(total), 0) as revenue
+      FROM documents
+      WHERE business_id = ?
+        AND doc_type IN ('INVOICE','RECEIPT','URERECEIPT')
+        AND status IN ('ISSUED','SIGNED','PARTIAL','PAID')
+        ${fromMillis != null ? 'AND issue_date >= ?' : ''}
+        ${toMillis != null ? 'AND issue_date < ?' : ''}
+    """,
+        [businessId,
+         if (fromMillis != null) fromMillis,
+         if (toMillis != null) toMillis]);
+    final expenseRow = await (await db).rawQuery("""
+      SELECT COALESCE(SUM(amount), 0) as expenses
+      FROM expenses WHERE business_id = ?
+        ${fromMillis != null ? 'AND expense_at >= ?' : ''}
+        ${toMillis != null ? 'AND expense_at < ?' : ''}
+    """,
+        [businessId,
+         if (fromMillis != null) fromMillis,
+         if (toMillis != null) toMillis]);
+
+    final revenue = (salesRows.first['revenue'] as num).toInt();
+    final expenses = (expenseRow.first['expenses'] as num).toInt();
+    return {'revenue': revenue, 'expenses': expenses, 'net': revenue - expenses};
+  }
 
   // ------------------ Documents ------------------
 
@@ -322,15 +543,28 @@ CREATE TABLE settings (
 
   Future<void> updateDocumentTotals(String docId) async {
     final items = await documentItems(docId);
-    int subtotal = 0;
+    int subtotal = 0; // gross before discounts
+    int discountTotal = 0;
     int taxTotal = 0;
     for (final it in items) {
-      subtotal += it.lineTotal;
+      final discount = it.discountAmount ?? 0;
+      subtotal += it.lineTotal + discount;
+      discountTotal += discount;
       taxTotal += (((it.taxPercent ?? 0) / 100) * it.lineTotal).round();
     }
+    final docRows = await (await db).query('documents',
+        columns: ['charge_total'], where: 'id = ?', whereArgs: [docId]);
+    final charges =
+        docRows.isEmpty ? 0 : (docRows.first['charge_total'] as num?)?.toInt() ?? 0;
     await (await db).update(
         'documents',
-        {'subtotal': subtotal, 'tax_total': taxTotal, 'total': subtotal + taxTotal, 'updated_at': DateTime.now().millisecondsSinceEpoch},
+        {
+          'subtotal': subtotal,
+          'tax_total': taxTotal,
+          'discount_total': discountTotal,
+          'total': subtotal - discountTotal + taxTotal + charges,
+          'updated_at': DateTime.now().millisecondsSinceEpoch
+        },
         where: 'id = ?',
         whereArgs: [docId]);
   }

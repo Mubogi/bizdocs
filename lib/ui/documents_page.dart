@@ -30,7 +30,8 @@ class _DocumentsPageState extends State<DocumentsPage> {
     final type = await showModalBottomSheet<DocType>(
         context: context,
         builder: (ctx) => SafeArea(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
                 ListTile(
                     leading: const Icon(Icons.receipt),
                     title: const Text('Invoice'),
@@ -47,8 +48,29 @@ class _DocumentsPageState extends State<DocumentsPage> {
                     leading: const Icon(Icons.mail),
                     title: const Text('Letter'),
                     onTap: () => Navigator.pop(ctx, DocType.letter)),
+                const Divider(),
+                ListTile(
+                    leading: const Icon(Icons.calculate_outlined),
+                    title: const Text('Estimate'),
+                    onTap: () => Navigator.pop(ctx, DocType.estimate)),
+                ListTile(
+                    leading: const Icon(Icons.description_outlined),
+                    title: const Text('Proforma invoice'),
+                    onTap: () => Navigator.pop(ctx, DocType.proforma)),
+                ListTile(
+                    leading: const Icon(Icons.local_shipping_outlined),
+                    title: const Text('Delivery note'),
+                    onTap: () => Navigator.pop(ctx, DocType.deliveryNote)),
+                ListTile(
+                    leading: const Icon(Icons.verified_outlined),
+                    title: const Text('E-Receipt (URA)'),
+                    onTap: () => Navigator.pop(ctx, DocType.uraReceipt)),
+                ListTile(
+                    leading: const Icon(Icons.notification_important_outlined),
+                    title: const Text('Payment reminder'),
+                    onTap: () => Navigator.pop(ctx, DocType.reminder)),
               ]),
-            ));
+            )));
     if (type == null) return;
     final created = await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => DocumentEditorPage(business: widget.business, docType: type)));

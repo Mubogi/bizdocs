@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
@@ -8,6 +10,7 @@ import '../pdf_doc.dart' as pdfgen;
 import 'signature_page.dart';
 import 'outbox_page.dart';
 import 'pdf_preview_page.dart';
+import 'scan_page.dart';
 
 class DocumentEditorPage extends StatefulWidget {
   final Business business;
@@ -28,7 +31,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
   final _content = TextEditingController();
   bool _busy = false;
 
-  bool get _isLetter => widget.docType == DocType.letter;
+  bool get _isLetter =>
+      widget.docType == DocType.letter || widget.docType == DocType.reminder;
   bool get _isLocked => _doc != null && _doc!.locked;
 
   int get _total {
@@ -83,6 +87,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
         docType: widget.docType,
         docNumber: number,
         issueDate: now,
+        currency: widget.business.currency,
+        terms: widget.business.termsTemplate,
         createdAt: now,
         updatedAt: now);
     if (_isLetter) _doc!.content = _content.text;
@@ -311,6 +317,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
         docType: target,
         docNumber: number,
         issueDate: now,
+        currency: _doc!.currency,
+        terms: _doc!.terms,
         linkedDocId: _doc!.id,
         createdAt: now,
         updatedAt: now);
@@ -322,6 +330,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
             description: it.description,
             quantity: it.quantity,
             unitPrice: it.unitPrice,
+            discountPercent: it.discountPercent,
+            discountAmount: it.discountAmount,
             taxPercent: it.taxPercent,
             lineTotal: it.lineTotal))
         .toList();
@@ -331,6 +341,86 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
     Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => DocumentEditorPage(
             business: widget.business, docType: target, existing: newDoc)));
+  }
+
+  Future<void> _addAttachment() async {
+    await _ensureDoc();
+    final files = await FilePicker.pickFiles(
+        type: FileType.image, allowMultiple: true);
+    if (files.isEmpty) return;
+    final dir = await getApplicationDocumentsDirectory();
+    final current = <String>[
+      ...((_doc!.attachmentsJson != null && _doc!.attachmentsJson!.isNotEmpty)
+          ? (List<dynamic>.from(jsonDecode(_doc!.attachmentsJson!))
+              .map((e) => e.toString()))
+          : <String>[])
+    ];
+    for (final f in files) {
+      if (f.path == null) continue;
+      final dest =
+          '${dir.path}/att_${_doc!.id}_${DateTime.now().millisecondsSinceEpoch}_${f.name}';
+      await File(f.path!).copy(dest);
+      current.add(dest);
+    }
+    _doc!.attachmentsJson = jsonEncode(current);
+    await AppDatabase.instance.saveDocument(_doc!, _items);
+    await _reloadDoc();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              '${current.length} photo(s) attached — they print as extra PDF pages.')));
+    }
+  }
+
+  Future<void> _createReminder() async {
+    if (_doc == null) return;
+    final paid = await AppDatabase.instance.totalPaid(_doc!.id);
+    final outstanding = _doc!.total - paid;
+    if (outstanding <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Nothing outstanding on this invoice.')));
+      }
+      return;
+    }
+    final number = await AppDatabase.instance
+        .nextDocNumber(widget.business.id, DocType.reminder);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final b = widget.business;
+    final customerName = _customer?.name ?? 'Valued Customer';
+    final content = 'Dear $customerName,\n\n'
+        'This is a friendly reminder that invoice ${_doc!.docNumber} '
+        'for ${b.currency} $outstanding is still outstanding.\n\n'
+        'Kindly settle at your earliest convenience.\n\n'
+        'Payment details:\n'
+        '${[
+          if ((b.bankName ?? '').isNotEmpty) 'Bank: ${b.bankName}',
+          if ((b.bankAccountName ?? '').isNotEmpty) 'Account name: ${b.bankAccountName}',
+          if ((b.bankAccountNo ?? '').isNotEmpty) 'Account no: ${b.bankAccountNo}',
+          if ((b.mobileMoneyNumber ?? '').isNotEmpty)
+            'Mobile money (${b.mobileMoneyProvider ?? ''}): ${b.mobileMoneyNumber}',
+          if ((b.merchantCode ?? '').isNotEmpty) 'Merchant code: ${b.merchantCode}',
+        ].join('\n')}\n\n'
+        'Yours faithfully,\n${b.name}';
+    final reminder = Document(
+        id: AppDatabase.newId(),
+        businessId: b.id,
+        customerId: _doc!.customerId,
+        docType: DocType.reminder,
+        docNumber: number,
+        status: 'ISSUED',
+        content: content,
+        issueDate: now,
+        total: outstanding,
+        currency: b.currency,
+        linkedDocId: _doc!.id,
+        createdAt: now,
+        updatedAt: now);
+    await AppDatabase.instance.saveDocument(reminder, []);
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => DocumentEditorPage(
+            business: b, docType: DocType.reminder, existing: reminder)));
   }
 
   @override
@@ -343,6 +433,11 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
             ? doc.docNumber
             : 'New ${docTypeLabel(widget.docType)}'),
         actions: [
+          if (doc != null && !doc.locked)
+            IconButton(
+                icon: const Icon(Icons.attach_file),
+                tooltip: 'Attach photos',
+                onPressed: _addAttachment),
           if (doc != null)
             IconButton(
                 icon: const Icon(Icons.preview),
@@ -438,43 +533,54 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: Row(children: [
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
             if (doc != null && !doc.locked)
-              Expanded(
-                  child: FilledButton.icon(
-                      onPressed: _busy ? null : _sign,
-                      icon: const Icon(Icons.gesture),
-                      label: const Text('Issue & Sign'))),
+              FilledButton.icon(
+                  onPressed: _busy ? null : _sign,
+                  icon: const Icon(Icons.gesture),
+                  label: const Text('Issue & Sign')),
             if (doc != null && doc.locked) ...[
-              Expanded(
-                  child: FilledButton.icon(
-                      onPressed: () => _buildAndPreviewPdf(andSend: true),
-                      icon: const Icon(Icons.ios_share),
-                      label: Text('Send ${doc.docNumber}'))),
-              if (doc.docType == DocType.quotation) ...[
+              FilledButton.icon(
+                  onPressed: () => _buildAndPreviewPdf(andSend: true),
+                  icon: const Icon(Icons.ios_share),
+                  label: Text('Send ${doc.docNumber}')),
+              if (doc.docType == DocType.quotation ||
+                  doc.docType == DocType.estimate ||
+                  doc.docType == DocType.proforma) ...[
                 const SizedBox(width: 8),
-                Expanded(
-                    child: OutlinedButton.icon(
-                        onPressed: () => _convert(DocType.invoice),
-                        icon: const Icon(Icons.transform),
-                        label: const Text('To Invoice'))),
+                OutlinedButton.icon(
+                    onPressed: () => _convert(DocType.invoice),
+                    icon: const Icon(Icons.transform),
+                    label: const Text('To Invoice')),
               ],
               if (doc.docType == DocType.invoice) ...[
                 const SizedBox(width: 8),
-                Expanded(
-                    child: OutlinedButton.icon(
-                        onPressed: _recordPayment,
-                        icon: const Icon(Icons.payments),
-                        label: const Text('Payment'))),
+                OutlinedButton.icon(
+                    onPressed: _recordPayment,
+                    icon: const Icon(Icons.payments),
+                    label: const Text('Payment')),
                 const SizedBox(width: 8),
-                Expanded(
-                    child: OutlinedButton.icon(
-                        onPressed: () => _convert(DocType.receipt),
-                        icon: const Icon(Icons.receipt),
-                        label: const Text('Receipt'))),
+                OutlinedButton.icon(
+                    onPressed: () => _convert(DocType.receipt),
+                    icon: const Icon(Icons.receipt),
+                    label: const Text('Receipt')),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                    onPressed: _createReminder,
+                    icon: const Icon(Icons.notification_important_outlined),
+                    label: const Text('Remind')),
+              ],
+              if (doc.docType == DocType.invoice || doc.docType == DocType.receipt) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                    onPressed: () => _convert(DocType.deliveryNote),
+                    icon: const Icon(Icons.local_shipping_outlined),
+                    label: const Text('Delivery')),
               ],
             ],
-          ]),
+          ])),
         ),
       ),
     );
@@ -518,6 +624,7 @@ class _ItemSheetState extends State<ItemSheet> {
   final _qty = TextEditingController(text: '1');
   final _price = TextEditingController();
   final _tax = TextEditingController();
+  final _discount = TextEditingController();
 
   @override
   void initState() {
@@ -544,16 +651,41 @@ class _ItemSheetState extends State<ItemSheet> {
         Text('Add item', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
         if (widget.products.isNotEmpty)
-          DropdownButtonFormField<Product?>(
-              value: _selected,
-              decoration: const InputDecoration(labelText: 'From products'),
-              items: [
-                const DropdownMenuItem<Product?>(
-                    value: null, child: Text('Custom item')),
-                ...widget.products.map((p) => DropdownMenuItem<Product?>(
-                    value: p, child: Text(p.name))),
-              ],
-              onChanged: _onProduct),
+          Row(children: [
+            Expanded(
+                child: DropdownButtonFormField<Product?>(
+                    value: _selected,
+                    decoration: const InputDecoration(labelText: 'From products'),
+                    items: [
+                      const DropdownMenuItem<Product?>(
+                          value: null, child: Text('Custom item')),
+                      ...widget.products.map((p) => DropdownMenuItem<Product?>(
+                          value: p, child: Text(p.name))),
+                    ],
+                    onChanged: _onProduct)),
+            IconButton(
+                tooltip: 'Scan barcode',
+                icon: const Icon(Icons.qr_code_scanner),
+                onPressed: () async {
+                  final code = await Navigator.of(context).push<String>(
+                      MaterialPageRoute(builder: (_) => const ScanPage()));
+                  if (code == null) return;
+                  Product? match;
+                  for (final p in widget.products) {
+                    if (p.barcode == code) {
+                      match = p;
+                      break;
+                    }
+                  }
+                  if (match != null) {
+                    _onProduct(match);
+                  } else if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(
+                            'No product with barcode $code. Add it in Products first.')));
+                  }
+                }),
+          ]),
         TextField(
             controller: _description,
             decoration: const InputDecoration(labelText: 'Description')),
@@ -578,6 +710,12 @@ class _ItemSheetState extends State<ItemSheet> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true))),
         ]),
+        const SizedBox(height: 8),
+        TextField(
+            controller: _discount,
+            decoration: const InputDecoration(
+                labelText: 'Discount % (optional)', prefixIcon: Icon(Icons.percent)),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true)),
         const SizedBox(height: 16),
         FilledButton(
             onPressed: () {
@@ -586,7 +724,15 @@ class _ItemSheetState extends State<ItemSheet> {
               final price =
                   int.tryParse(_price.text.replaceAll(RegExp(r'[,\s]'), '')) ?? 0;
               final tax = double.tryParse(_tax.text.trim());
+              final discountPct = double.tryParse(_discount.text.trim());
               if (desc.isEmpty) return;
+              final gross = (qty * price).round();
+              int? discountAmt;
+              var net = gross;
+              if (discountPct != null && discountPct > 0) {
+                discountAmt = ((discountPct / 100) * gross).round();
+                net = gross - discountAmt;
+              }
               final item = DocumentItem(
                   id: AppDatabase.newId(),
                   documentId: '',
@@ -594,8 +740,10 @@ class _ItemSheetState extends State<ItemSheet> {
                   description: desc,
                   quantity: qty,
                   unitPrice: price,
+                  discountPercent: discountPct,
+                  discountAmount: discountAmt,
                   taxPercent: tax,
-                  lineTotal: (qty * price).round());
+                  lineTotal: net);
               Navigator.of(context).pop(item);
             },
             child: const Text('Add')),
