@@ -1,11 +1,13 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
 import '../models.dart';
-import '../pdf_doc.dart';
+import '../pdf_doc.dart' as pdfgen;
 import 'signature_page.dart';
 import 'outbox_page.dart';
+import 'pdf_preview_page.dart';
 
 class DocumentEditorPage extends StatefulWidget {
   final Business business;
@@ -29,6 +31,16 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
   bool get _isLetter => widget.docType == DocType.letter;
   bool get _isLocked => _doc != null && _doc!.locked;
 
+  int get _total {
+    if (_doc != null && _doc!.total > 0) return _doc!.total;
+    int subtotal = 0, tax = 0;
+    for (final it in _items) {
+      subtotal += it.lineTotal;
+      tax += (((it.taxPercent ?? 0) / 100) * it.lineTotal).round();
+    }
+    return subtotal + tax;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -41,14 +53,23 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
       _doc = widget.existing;
       _items = await db.documentItems(_doc!.id);
       if (_doc!.customerId != null) {
-        final customers = await db.listCustomers(widget.business.id);
+        final c = await db.listCustomers(widget.business.id);
         try {
-          _customer = customers.firstWhere((c) => c.id == _doc!.customerId);
+          _customer = c.firstWhere((e) => e.id == _doc!.customerId);
         } catch (_) {}
         if (_doc!.content != null) _content.text = _doc!.content!;
       }
       if (mounted) setState(() {});
     }
+  }
+
+  Future<void> _reloadDoc() async {
+    final db = await AppDatabase.instance.db;
+    final rows = await db.query('documents',
+        where: 'id = ?', whereArgs: [_doc!.id], limit: 1);
+    if (rows.isNotEmpty) _doc = Document.fromMap(rows.first);
+    _items = await AppDatabase.instance.documentItems(_doc!.id);
+    if (mounted) setState(() {});
   }
 
   Future<void> _ensureDoc() async {
@@ -57,19 +78,21 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
         await AppDatabase.instance.nextDocNumber(widget.business.id, widget.docType);
     final now = DateTime.now().millisecondsSinceEpoch;
     _doc = Document(
-      id: AppDatabase.newId(),
-      businessId: widget.business.id,
-      docType: widget.docType,
-      docNumber: number,
-      issueDate: now,
-      createdAt: now,
-      updatedAt: now,
-    );
+        id: AppDatabase.newId(),
+        businessId: widget.business.id,
+        docType: widget.docType,
+        docNumber: number,
+        issueDate: now,
+        createdAt: now,
+        updatedAt: now);
+    if (_isLetter) _doc!.content = _content.text;
+    await AppDatabase.instance.saveDocument(_doc!, []);
+    await _reloadDoc();
   }
 
   Future<void> _pickCustomer() async {
     if (_isLocked) return;
-    final customers = await AppDatabase.instance.listCustomers(widget.business.id);
+    final list = await AppDatabase.instance.listCustomers(widget.business.id);
     if (!mounted) return;
     final picked = await showModalBottomSheet<Customer?>(
         context: context,
@@ -78,23 +101,21 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
               ListTile(
                   leading: const Icon(Icons.person_off_outlined),
                   title: const Text('Walk-in / no customer'),
-                  onTap: () => Navigator.pop(ctx, null)),
-              ...customers.map((c) => ListTile(
-                    leading: CircleAvatar(
-                        child: Text(c.name.isNotEmpty ? c.name[0] : '?')),
+                  onTap: () => Navigator.pop(ctx, _NoCustomer())),
+              ...list.map((c) => ListTile(
+                    leading: CircleAvatar(child: Text(c.name.isNotEmpty ? c.name[0] : '?')),
                     title: Text(c.name),
                     subtitle: Text([
                       if ((c.whatsapp ?? '').isNotEmpty) c.whatsapp,
                       if ((c.phone ?? '').isNotEmpty) c.phone,
                     ].whereType<String>().join(' · ')),
-                    onTap: () => Navigator.pop(ctx, c),
-                  )),
+                    onTap: () => Navigator.pop(ctx, c))),
             ]));
-    if (!mounted) return;
-    setState(() {
-      // picked == null means walk-in (or canceled with null result; treat cancel separately)
-      _customer = picked;
-    });
+    if (picked is _NoCustomer) {
+      setState(() => _customer = null);
+    } else if (picked != null) {
+      setState(() => _customer = picked);
+    }
   }
 
   Future<void> _addItem() async {
@@ -102,55 +123,92 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
     final products = await AppDatabase.instance.listProducts(widget.business.id);
     if (!mounted) return;
     final result = await showModalBottomSheet<DocumentItem>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: ItemSheet(products: products, defaultTax: widget.business.defaultTaxPercent),
-      ),
-    );
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => Padding(
+            padding:
+                EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: ItemSheet(
+                products: products,
+                defaultTax: widget.business.defaultTaxPercent)));
     if (result == null) return;
     await _ensureDoc();
     result.documentId = _doc!.id;
     result.id = AppDatabase.newId();
     await AppDatabase.instance.saveDocument(_doc!, [..._items, result]);
-    _items = await AppDatabase.instance.documentItems(_doc!.id);
     await AppDatabase.instance.updateDocumentTotals(_doc!.id);
     await _reloadDoc();
   }
 
-  Future<void> _removeItem(String id) async {
+  Future<void> _removeItem(DocumentItem it) async {
     if (_isLocked) return;
-    final remaining = _items.where((i) => i.id != id).toList();
+    final remaining = [..._items]..removeWhere((x) => x.id == it.id);
     await AppDatabase.instance.saveDocument(_doc!, remaining);
-    _items = remaining;
     await AppDatabase.instance.updateDocumentTotals(_doc!.id);
     await _reloadDoc();
   }
 
-  Future<void> _reloadDoc() async {
-    final db = await AppDatabase.instance.db;
-    final rows =
-        await db.query('documents', where: 'id = ?', whereArgs: [_doc!.id], limit: 1);
-    if (rows.isNotEmpty) _doc = Document.fromMap(rows.first);
-    if (mounted) setState(() {});
+  Future<void> _buildAndPreviewPdf({bool andSend = false}) async {
+    await _ensureDoc();
+    if (_isLetter) {
+      _doc!.content = _content.text;
+      await AppDatabase.instance.saveDocument(_doc!, _items);
+    }
+    final isPro = (await AppDatabase.instance.subscription()).isPro;
+    final sigPath = await AppDatabase.instance.getSignature(_doc!.id);
+    final sigPng = sigPath != null && File(sigPath.imagePath).existsSync()
+        ? await File(sigPath.imagePath).readAsBytes()
+        : null;
+    Future<Uint8List> build() => pdfgen.documentPdfBytes(
+        business: widget.business,
+        customer: _customer,
+        doc: _doc!,
+        items: _items,
+        signaturePng: sigPng,
+        signerName: sigPath?.signerName,
+        docHash: _doc!.hash,
+        isPro: isPro);
+    if (!mounted) return;
+    if (andSend) {
+      await pdfgen.documentPdfToCache(
+          business: widget.business,
+          customer: _customer,
+          doc: _doc!,
+          items: _items,
+          signaturePng: sigPng,
+          signerName: sigPath?.signerName,
+          docHash: _doc!.hash,
+          isPro: isPro);
+      await AppDatabase.instance.enqueueOutbox(OutboxEntry(
+          id: AppDatabase.newId(),
+          documentId: _doc!.id,
+          channel: 'PDF',
+          recipient: _customer?.whatsapp ?? _customer?.phone ?? 'customer',
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+          updatedAt: DateTime.now().millisecondsSinceEpoch));
+      if (!mounted) return;
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const OutboxPage()));
+    } else {
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => PdfPreviewPage(
+              buildPdf: build,
+              title: '${_doc!.docNumber} Preview')));
+    }
   }
 
   Future<void> _sign() async {
     await _ensureDoc();
     if (_isLetter) {
       _doc!.content = _content.text;
-      final dbRef = AppDatabase.instance;
-      final direct = await dbRef.db;
-      await direct.update('documents', {'content': _content.text},
+      final db = await AppDatabase.instance.db;
+      await db.update('documents', {'content': _content.text},
           where: 'id = ?', whereArgs: [_doc!.id]);
     }
     await AppDatabase.instance.setDocumentStatus(_doc!.id, 'ISSUED');
-    if (!mounted) return;
     final sig = await Navigator.of(context).push<SignatureResult>(
         MaterialPageRoute(builder: (_) => const SignaturePage()));
-    if (sig == null) return;
+    if (sig == null || !mounted) return;
     setState(() => _busy = true);
     try {
       final hash = shortContentHash(_doc!, _items);
@@ -165,7 +223,7 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
           hash: hash,
           signedAt: DateTime.now().millisecondsSinceEpoch));
       final isPro = (await AppDatabase.instance.subscription()).isPro;
-      final pdfPath = await buildDocumentPdf(
+      final pdfPath = await pdfgen.documentPdfToCache(
           business: widget.business,
           customer: _customer,
           doc: _doc!,
@@ -175,20 +233,18 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
           docHash: hash,
           isPro: isPro);
       await AppDatabase.instance.updateDocumentPdf(_doc!.id, pdfPath, hash);
-      final recipient = _customer?.whatsapp ?? _customer?.phone ?? '';
       await AppDatabase.instance.enqueueOutbox(OutboxEntry(
           id: AppDatabase.newId(),
           documentId: _doc!.id,
-          channel: recipient.isNotEmpty ? 'WHATSAPP' : 'SHARE',
-          recipient: recipient.isEmpty ? 'customer' : recipient,
+          channel: 'PDF',
+          recipient: _customer?.whatsapp ?? _customer?.phone ?? 'customer',
           createdAt: DateTime.now().millisecondsSinceEpoch,
           updatedAt: DateTime.now().millisecondsSinceEpoch));
       await _reloadDoc();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${_doc!.docNumber} signed and queued for sending.')));
-      Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => const OutboxPage()));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${_doc!.docNumber} signed and queued.')));
+      await _buildAndPreviewPdf(andSend: false);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -198,8 +254,7 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
     if (_doc == null || _doc!.total <= 0) return;
     final paid = await AppDatabase.instance.totalPaid(_doc!.id);
     if (paid >= _doc!.total) return;
-    final amountCtrl =
-        TextEditingController(text: (_doc!.total - paid).toString());
+    final amtCtrl = TextEditingController(text: (_doc!.total - paid).toString());
     String method = 'MTN';
     final ok = await showDialog<bool>(
         context: context,
@@ -207,9 +262,10 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
               title: Text('Record payment for ${_doc!.docNumber}'),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
                 TextField(
-                    controller: amountCtrl,
+                    controller: amtCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: InputDecoration(labelText: 'Amount (${widget.business.currency})')),
+                    decoration: InputDecoration(
+                        labelText: 'Amount (${widget.business.currency})')),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                     value: method,
@@ -231,7 +287,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
               ],
             ));
     if (ok != true) return;
-    final amount = int.tryParse(amountCtrl.text.replaceAll(RegExp(r'[,\s]'), '')) ?? 0;
+    final amount =
+        int.tryParse(amtCtrl.text.replaceAll(RegExp(r'[,\s]'), '')) ?? 0;
     if (amount <= 0) return;
     await AppDatabase.instance.addPayment(Payment(
         id: AppDatabase.newId(),
@@ -244,7 +301,8 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
 
   Future<void> _convert(DocType target) async {
     if (_doc == null) return;
-    final number = await AppDatabase.instance.nextDocNumber(widget.business.id, target);
+    final number =
+        await AppDatabase.instance.nextDocNumber(widget.business.id, target);
     final now = DateTime.now().millisecondsSinceEpoch;
     final newDoc = Document(
         id: AppDatabase.newId(),
@@ -270,31 +328,31 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
     await AppDatabase.instance.saveDocument(newDoc, items);
     await AppDatabase.instance.updateDocumentTotals(newDoc.id);
     if (!mounted) return;
-    final created = await Navigator.of(context).push<bool>(MaterialPageRoute(
+    Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => DocumentEditorPage(
             business: widget.business, docType: target, existing: newDoc)));
-    if (created == true) Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
     final doc = _doc;
-    final total = doc?.total ?? _runningTotal(_items);
-    final title = doc != null
-        ? doc.docNumber
-        : 'New ${docTypeLabel(widget.docType)}';
-
+    final total = _total;
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: Text(doc != null
+            ? doc.docNumber
+            : 'New ${docTypeLabel(widget.docType)}'),
         actions: [
-          if (doc != null && doc.locked && doc.pdfPath != null)
+          if (doc != null)
             IconButton(
-                icon: const Icon(Icons.send),
-                tooltip: 'Send',
-                onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const OutboxPage())),
-                ),
+                icon: const Icon(Icons.preview),
+                tooltip: 'Preview PDF',
+                onPressed: () => _buildAndPreviewPdf()),
+          if (doc != null && doc.locked)
+            IconButton(
+                icon: const Icon(Icons.ios_share),
+                tooltip: 'Send / Share',
+                onPressed: () => _buildAndPreviewPdf(andSend: true)),
         ],
       ),
       body: _busy
@@ -331,7 +389,9 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
               else
                 Expanded(
                     child: _items.isEmpty
-                        ? const Center(child: Text('No items yet. Tap "Add item".'))
+                        ? Center(
+                            child:
+                                Text('No items yet. Tap below to add.'))
                         : ListView.builder(
                             itemCount: _items.length,
                             itemBuilder: (_, i) {
@@ -340,40 +400,40 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
                                 title: Text(it.description),
                                 subtitle:
                                     Text('${it.quantity} × ${it.unitPrice}'),
-                                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                  Text('${it.lineTotal}',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  if (!_isLocked)
-                                    IconButton(
-                                        icon: const Icon(
-                                            Icons.delete_outline),
-                                        onPressed: () => _removeItem(it.id)),
-                                ]),
+                                trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text('${it.lineTotal}',
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold)),
+                                      if (!_isLocked)
+                                        IconButton(
+                                            icon: const Icon(
+                                                Icons.delete_outline),
+                                            onPressed: () =>
+                                                _removeItem(it)),
+                                    ]),
                               );
                             })),
               Container(
-                padding: const EdgeInsets.all(16),
-                width: double.infinity,
-                decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest),
-                child: Row(children: [
-                  Expanded(
-                      child: Text('Total: ${widget.business.currency} $total',
-                          style:
-                              const TextStyle(fontWeight: FontWeight.bold))),
-                  if (!_isLetter && !_isLocked)
-                    ElevatedButton.icon(
-                        onPressed: doc == null
-                            ? () async {
-                                await _ensureDoc();
-                                if (mounted) setState(() {});
-                              }
-                            : _addItem,
-                        icon: const Icon(Icons.add),
-                        label: Text(doc == null ? 'Start' : 'Add item')),
-                ]),
-              ),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                  child: Row(children: [
+                    Expanded(
+                        child: Text(
+                            'Total: ${widget.business.currency} $total',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold))),
+                    if (!_isLetter && !_isLocked)
+                      ElevatedButton.icon(
+                          onPressed: doc == null
+                              ? _ensureDoc
+                              : _addItem,
+                          icon: const Icon(Icons.add),
+                          label: Text(doc == null ? 'Start' : 'Add item')),
+                  ])),
             ]),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -387,16 +447,14 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
                       label: const Text('Issue & Sign'))),
             if (doc != null && doc.locked) ...[
               Expanded(
-                  child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => const OutboxPage())),
+                  child: FilledButton.icon(
+                      onPressed: () => _buildAndPreviewPdf(andSend: true),
                       icon: const Icon(Icons.ios_share),
-                      label: Text('Send (${doc.docNumber})'))),
+                      label: Text('Send ${doc.docNumber}'))),
               if (doc.docType == DocType.quotation) ...[
                 const SizedBox(width: 8),
                 Expanded(
-                    child: FilledButton.icon(
+                    child: OutlinedButton.icon(
                         onPressed: () => _convert(DocType.invoice),
                         icon: const Icon(Icons.transform),
                         label: const Text('To Invoice'))),
@@ -404,7 +462,7 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
               if (doc.docType == DocType.invoice) ...[
                 const SizedBox(width: 8),
                 Expanded(
-                    child: FilledButton.icon(
+                    child: OutlinedButton.icon(
                         onPressed: _recordPayment,
                         icon: const Icon(Icons.payments),
                         label: const Text('Payment'))),
@@ -429,19 +487,20 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
       child: Text(
           _isLetter
               ? 'Write your letter above, then press "Issue & Sign".'
-              : 'Add items to this document, then press "Issue & Sign".',
+              : 'Add items below, then press "Issue & Sign".',
           textAlign: TextAlign.center),
     ));
   }
+}
 
-  int _runningTotal(List<DocumentItem> items) {
-    int subtotal = 0, tax = 0;
-    for (final it in items) {
-      subtotal += it.lineTotal;
-      tax += (((it.taxPercent ?? 0) / 100) * it.lineTotal).round();
-    }
-    return subtotal + tax;
-  }
+class _NoCustomer extends Customer {
+  _NoCustomer()
+      : super(
+            id: '',
+            businessId: '',
+            name: '',
+            createdAt: 0,
+            updatedAt: 0);
 }
 
 class ItemSheet extends StatefulWidget {
@@ -489,9 +548,10 @@ class _ItemSheetState extends State<ItemSheet> {
               value: _selected,
               decoration: const InputDecoration(labelText: 'From products'),
               items: [
-                const DropdownMenuItem<Product?>(value: null, child: Text('Custom item')),
-                ...widget.products.map((p) =>
-                    DropdownMenuItem<Product?>(value: p, child: Text(p.name))),
+                const DropdownMenuItem<Product?>(
+                    value: null, child: Text('Custom item')),
+                ...widget.products.map((p) => DropdownMenuItem<Product?>(
+                    value: p, child: Text(p.name))),
               ],
               onChanged: _onProduct),
         TextField(
@@ -502,7 +562,8 @@ class _ItemSheetState extends State<ItemSheet> {
               child: TextField(
                   controller: _qty,
                   decoration: const InputDecoration(labelText: 'Qty'),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true))),
           const SizedBox(width: 8),
           Expanded(
               child: TextField(
@@ -514,7 +575,8 @@ class _ItemSheetState extends State<ItemSheet> {
               child: TextField(
                   controller: _tax,
                   decoration: const InputDecoration(labelText: 'Tax %'),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true))),
         ]),
         const SizedBox(height: 16),
         FilledButton(

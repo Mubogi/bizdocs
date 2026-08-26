@@ -24,6 +24,14 @@ class Business {
   String? phone;
   String? whatsapp;
   String? email;
+  String? logoPath;
+  String? bankName;
+  String? bankAccountName;
+  String? bankAccountNo;
+  String? mobileMoneyNumber;
+  String? mobileMoneyProvider;
+  String? merchantCode;
+  String? templateJson;
   String currency;
   double defaultTaxPercent;
   int createdAt;
@@ -37,6 +45,14 @@ class Business {
     this.phone,
     this.whatsapp,
     this.email,
+    this.logoPath,
+    this.bankName,
+    this.bankAccountName,
+    this.bankAccountNo,
+    this.mobileMoneyNumber,
+    this.mobileMoneyProvider,
+    this.merchantCode,
+    this.templateJson,
     this.currency = 'UGX',
     this.defaultTaxPercent = 0,
     required this.createdAt,
@@ -51,6 +67,14 @@ class Business {
         phone: m['phone'] as String?,
         whatsapp: m['whatsapp'] as String?,
         email: m['email'] as String?,
+        logoPath: m['logo_path'] as String?,
+        bankName: m['bank_name'] as String?,
+        bankAccountName: m['bank_account_name'] as String?,
+        bankAccountNo: m['bank_account_no'] as String?,
+        mobileMoneyNumber: m['mobile_money_number'] as String?,
+        mobileMoneyProvider: m['mobile_money_provider'] as String?,
+        merchantCode: m['merchant_code'] as String?,
+        templateJson: m['template_json'] as String?,
         currency: (m['currency'] as String?) ?? 'UGX',
         defaultTaxPercent: (m['default_tax_percent'] as num?)?.toDouble() ?? 0,
         createdAt: m['created_at'] as int,
@@ -59,7 +83,14 @@ class Business {
 
   Map<String, dynamic> toMap() => {
         'id': id, 'name': name, 'tin': tin, 'address': address, 'phone': phone,
-        'whatsapp': whatsapp, 'email': email, 'currency': currency,
+        'whatsapp': whatsapp, 'email': email, 'logo_path': logoPath,
+        'bank_name': bankName, 'bank_account_name': bankAccountName,
+        'bank_account_no': bankAccountNo,
+        'mobile_money_number': mobileMoneyNumber,
+        'mobile_money_provider': mobileMoneyProvider,
+        'merchant_code': merchantCode,
+        'template_json': templateJson,
+        'currency': currency,
         'default_tax_percent': defaultTaxPercent,
         'created_at': createdAt, 'updated_at': updatedAt,
       };

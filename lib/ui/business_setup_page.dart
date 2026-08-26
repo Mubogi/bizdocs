@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart' as fp;
+import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
 import '../models.dart';
 
@@ -20,6 +24,16 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
   final _email = TextEditingController();
   final _currency = TextEditingController(text: 'UGX');
   final _tax = TextEditingController();
+  String? _logoPath;
+
+  final _bankName = TextEditingController();
+  final _bankAccountName = TextEditingController();
+  final _bankAccountNo = TextEditingController();
+  final _momoNumber = TextEditingController();
+  final _momoProvider = TextEditingController();
+  final _merchantCode = TextEditingController();
+
+  int _accent = 0xFF0F7A3D; // green default
 
   @override
   void initState() {
@@ -34,71 +48,167 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
       _email.text = b.email ?? '';
       _currency.text = b.currency;
       _tax.text = b.defaultTaxPercent == 0 ? '' : b.defaultTaxPercent.toString();
+      _logoPath = b.logoPath;
+      _bankName.text = b.bankName ?? '';
+      _bankAccountName.text = b.bankAccountName ?? '';
+      _bankAccountNo.text = b.bankAccountNo ?? '';
+      _momoNumber.text = b.mobileMoneyNumber ?? '';
+      _momoProvider.text = b.mobileMoneyProvider ?? '';
+      _merchantCode.text = b.merchantCode ?? '';
+      if (b.templateJson != null) {
+        try {
+          _accent = (jsonDecode(b.templateJson!)['accent'] as num?)?.toInt() ?? _accent;
+        } catch (_) {}
+      }
     }
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _tin, _address, _phone, _whatsapp, _email, _currency, _tax]) {
+    for (final c in [
+      _name, _tin, _address, _phone, _whatsapp, _email, _currency, _tax,
+      _bankName, _bankAccountName, _bankAccountNo, _momoNumber, _momoProvider, _merchantCode
+    ]) {
       c.dispose();
     }
     super.dispose();
   }
 
+  Future<void> _pickLogo() async {
+    final files = await fp.FilePicker.pickFiles(type: fp.FileType.image);
+    if (files.isEmpty || files.single.path == null) return;
+    final file = files.single;
+    final dir = await getApplicationDocumentsDirectory();
+    final dest = '${dir.path}/logo_${DateTime.now().millisecondsSinceEpoch}.${(file.extension?.isNotEmpty == true ? file.extension : "png")}';
+    await File(file.path!).copy(dest);
+    setState(() => _logoPath = dest);
+  }
+
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    final existing = widget.existing;
+    final ex = widget.existing;
     final b = Business(
-      id: existing?.id ?? AppDatabase.newId(),
+      id: ex?.id ?? AppDatabase.newId(),
       name: _name.text.trim(),
-      tin: _tin.text.trim(),
-      address: _address.text.trim(),
-      phone: _phone.text.trim(),
+      tin: _tin.text.trim().isEmpty ? null : _tin.text.trim(),
+      address: _address.text.trim().isEmpty ? null : _address.text.trim(),
+      phone: _phone.text.trim().isEmpty ? null : _phone.text.trim(),
       whatsapp: _whatsapp.text.trim().isEmpty ? null : _whatsapp.text.trim(),
       email: _email.text.trim().isEmpty ? null : _email.text.trim(),
+      logoPath: _logoPath,
+      bankName: _bankName.text.trim().isEmpty ? null : _bankName.text.trim(),
+      bankAccountName:
+          _bankAccountName.text.trim().isEmpty ? null : _bankAccountName.text.trim(),
+      bankAccountNo:
+          _bankAccountNo.text.trim().isEmpty ? null : _bankAccountNo.text.trim(),
+      mobileMoneyNumber:
+          _momoNumber.text.trim().isEmpty ? null : _momoNumber.text.trim(),
+      mobileMoneyProvider:
+          _momoProvider.text.trim().isEmpty ? null : _momoProvider.text.trim(),
+      merchantCode:
+          _merchantCode.text.trim().isEmpty ? null : _merchantCode.text.trim(),
+      templateJson: jsonEncode({'accent': _accent}),
       currency: _currency.text.trim().isEmpty ? 'UGX' : _currency.text.trim(),
       defaultTaxPercent: double.tryParse(_tax.text.trim()) ?? 0,
-      createdAt: existing?.createdAt ?? now,
+      createdAt: ex?.createdAt ?? now,
       updatedAt: now,
     );
     await AppDatabase.instance.upsertBusiness(b);
-    if (!mounted) return;
-    Navigator.of(context).pop(b);
+    if (mounted) Navigator.of(context).pop(b);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Your business')),
+      appBar: AppBar(title: const Text('Business settings')),
       body: Form(
         key: _form,
         child: ListView(padding: const EdgeInsets.all(16), children: [
-          TextFormField(
-              controller: _name,
+          Center(child: GestureDetector(
+              onTap: _pickLogo,
+              child: Container(
+                  width: 110,
+                  height: 110,
+                  decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      shape: BoxShape.circle,
+                      image: _logoPath != null && File(_logoPath!).existsSync()
+                          ? DecorationImage(image: FileImage(File(_logoPath!)), fit: BoxFit.cover)
+                          : null),
+                  child: _logoPath == null
+                      ? const Icon(Icons.add_photo_alternate, size: 40)
+                      : null))),
+          const SizedBox(height: 16),
+          _section(context, 'Identity'),
+          TextFormField(controller: _name,
               decoration: const InputDecoration(labelText: 'Business name *'),
               validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null),
-          const SizedBox(height: 12),
-          TextFormField(controller: _tin, decoration: const InputDecoration(labelText: 'URA TIN (if any)')),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          TextFormField(controller: _tin, decoration: const InputDecoration(labelText: 'URA TIN (optional)')),
+          const SizedBox(height: 8),
           TextFormField(controller: _address, decoration: const InputDecoration(labelText: 'Address')),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           TextFormField(controller: _phone, decoration: const InputDecoration(labelText: 'Phone')),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           TextFormField(controller: _whatsapp, decoration: const InputDecoration(labelText: 'WhatsApp')),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           TextFormField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          _section(context, 'Presentation'),
           TextFormField(controller: _currency, decoration: const InputDecoration(labelText: 'Currency')),
-          const SizedBox(height: 12),
-          TextFormField(
-              controller: _tax,
-              decoration: const InputDecoration(labelText: 'Default tax % (e.g. 18 for VAT)'),
+          const SizedBox(height: 8),
+          TextFormField(controller: _tax,
+              decoration: const InputDecoration(labelText: 'Default tax %'),
               keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+          const SizedBox(height: 8),
+          Row(children: [
+            const Text('Template color: '),
+            ..._accents.map((c) => GestureDetector(
+                onTap: () => setState(() => _accent = c),
+                child: Container(
+                    width: 40, height: 40, margin: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                        color: Color(c), shape: BoxShape.circle,
+                        border: Border.all(
+                            color: _accent == c ? Colors.black : Colors.transparent, width: 3))))),
+          ]),
+          const SizedBox(height: 16),
+          _section(context, 'Payment details (invoice footer)'),
+          TextFormField(controller: _bankName,
+              decoration: const InputDecoration(labelText: 'Bank name (e.g. Stanbic Bank)')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _bankAccountName, decoration: const InputDecoration(labelText: 'Account name')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _bankAccountNo, decoration: const InputDecoration(labelText: 'Account number')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _momoNumber,
+              decoration: const InputDecoration(labelText: 'Mobile Money number / Pay Bill')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _momoProvider,
+              decoration: const InputDecoration(labelText: 'MoMo provider (e.g. MTN, Airtel)')),
+          const SizedBox(height: 8),
+          TextFormField(controller: _merchantCode,
+              decoration: const InputDecoration(labelText: 'Merchant code (from aggregator)')),
           const SizedBox(height: 24),
-          FilledButton.icon(onPressed: _save, icon: const Icon(Icons.check), label: const Text('Save')),
+          FilledButton.icon(onPressed: _save, icon: const Icon(Icons.check), label: const Text('Save settings')),
         ]),
       ),
     );
   }
+
+  Widget _section(BuildContext ctx, String t) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(t,
+          style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+              color: Theme.of(ctx).colorScheme.primary)));
+
+  static final List<int> _accents = [
+    0xFF0F7A3D, // green
+    0xFF1E3A8A, // navy
+    0xFFB91C1C, // red
+    0xFF7C3AED, // purple
+    0xFFB45309, // orange
+    0xFF111827, // black
+  ];
 }

@@ -14,8 +14,20 @@ class AppDatabase {
   Future<Database> get db async {
     _db ??= await openDatabase(
       join(await getDatabasesPath(), 'bizdocs.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, v) async => _createSchema(db),
+      onUpgrade: (db, oldVersion, newVersion) async {
+        for (final col in [
+          'logo_path TEXT',
+          'bank_name TEXT', 'bank_account_name TEXT', 'bank_account_no TEXT',
+          'mobile_money_number TEXT', 'mobile_money_provider TEXT',
+          'merchant_code TEXT', 'template_json TEXT'
+        ]) {
+          try {
+            await db.execute('ALTER TABLE businesses ADD COLUMN $col');
+          } catch (_) {}
+        }
+      },
     );
     return _db!;
   }
@@ -31,6 +43,13 @@ CREATE TABLE businesses (
   whatsapp TEXT,
   email TEXT,
   logo_path TEXT,
+  bank_name TEXT,
+  bank_account_name TEXT,
+  bank_account_no TEXT,
+  mobile_money_number TEXT,
+  mobile_money_provider TEXT,
+  merchant_code TEXT,
+  template_json TEXT,
   currency TEXT DEFAULT 'UGX',
   default_tax_percent REAL DEFAULT 0,
   created_at INTEGER NOT NULL,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../db/database.dart';
 import '../models.dart';
+import '../pdf_doc.dart';
 
 class OutboxPage extends StatefulWidget {
   const OutboxPage({super.key});
@@ -33,23 +34,64 @@ class _OutboxPageState extends State<OutboxPage> {
   Future<void> _send(OutboxEntry e) async {
     final db = AppDatabase.instance;
     final raw = await db.db;
-    final docs = await raw.query('documents', where: 'id = ?', whereArgs: [e.documentId], limit: 1);
+    final docs = await raw.query('documents',
+        where: 'id = ?', whereArgs: [e.documentId], limit: 1);
     if (docs.isEmpty) {
       await db.markOutbox(e, 'FAILED', lastError: 'Document missing');
       _refresh();
       return;
     }
     final doc = Document.fromMap(docs.first);
-    final path = doc.pdfPath;
+    String? path = doc.pdfPath;
+
+    // Rebuild PDF if missing
     if (path == null || !File(path).existsSync()) {
-      await db.markOutbox(e, 'FAILED', lastError: 'PDF missing');
-      _refresh();
-      return;
+      try {
+        final items = await db.documentItems(doc.id);
+        final bizRow = await raw.query('businesses',
+            where: 'id = ?', whereArgs: [doc.businessId], limit: 1);
+        if (bizRow.isEmpty) {
+          await db.markOutbox(e, 'FAILED', lastError: 'Business missing');
+          _refresh();
+          return;
+        }
+        Customer? cust;
+        if (doc.customerId != null) {
+          final custs = await db.listCustomers(doc.businessId);
+          try {
+            cust = custs.firstWhere((c) => c.id == doc.customerId);
+          } catch (_) {}
+        }
+        final isPro = (await db.subscription()).isPro;
+        final sig = await db.getSignature(doc.id);
+        final sigPng = sig != null && File(sig.imagePath).existsSync()
+            ? await File(sig.imagePath).readAsBytes()
+            : null;
+        path = await documentPdfToCache(
+            business: Business.fromMap(bizRow.first),
+            customer: cust,
+            doc: doc,
+            items: items,
+            signaturePng: sigPng,
+            signerName: sig?.signerName,
+            docHash: doc.hash,
+            isPro: isPro);
+        await db.updateDocumentPdf(doc.id, path, doc.hash ?? '');
+      } catch (err) {
+        await db.markOutbox(e, 'FAILED', lastError: '$err');
+        _refresh();
+        return;
+      }
     }
+
     final text = '${docTypeLabel(doc.docType)} ${doc.docNumber}';
-    await SharePlus.instance
-        .share(ShareParams(files: [XFile(path)], text: text));
-    await db.markOutbox(e, 'SENT');
+    try {
+      await SharePlus.instance
+          .share(ShareParams(files: [XFile(path)], text: text));
+      await db.markOutbox(e, 'SENT');
+    } catch (err) {
+      await db.markOutbox(e, 'FAILED', lastError: '$err');
+    }
     _refresh();
   }
 
