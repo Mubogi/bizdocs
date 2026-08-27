@@ -407,6 +407,50 @@ Future<Uint8List> documentPdfBytes({
     ]));
   }
 
+  // EFRIS fiscalization block: QR + FDN + verification code.
+  if (doc.fdn != null && doc.fdn!.isNotEmpty) {
+    final qrData = doc.verificationCode != null && doc.verificationCode!.isNotEmpty
+        ? 'FDN:${doc.fdn}|VC:${doc.verificationCode}'
+        : 'FDN:${doc.fdn}';
+    widgets.addAll([
+      pw.SizedBox(height: isMinimalLayout ? 4 : 10),
+      pw.Container(
+          width: double.infinity,
+          padding: pw.EdgeInsets.all(isMinimalLayout ? 4 : 8),
+          decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: accent, width: 1),
+              borderRadius: pw.BorderRadius.circular(3)),
+          child: pw.Row(children: [
+            pw.BarcodeWidget(
+                barcode: pw.Barcode.qrCode(),
+                data: qrData,
+                width: isMinimalLayout ? 44 : 64,
+                height: isMinimalLayout ? 44 : 64),
+            pw.SizedBox(width: 8),
+            pw.Expanded(
+                child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                  pw.Text('EFRIS fiscal document',
+                      style: pw.TextStyle(
+                          fontSize: tinyFontSize,
+                          color: accent,
+                          fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 2),
+                  pw.Text('FDN: ${doc.fdn}',
+                      style: pw.TextStyle(fontSize: smallFontSize)),
+                  if (doc.verificationCode != null &&
+                      doc.verificationCode!.isNotEmpty)
+                    pw.Text('Verification code: ${doc.verificationCode}',
+                        style: pw.TextStyle(fontSize: smallFontSize)),
+                  pw.Text('Verify with the URA EFRIS app',
+                      style: pw.TextStyle(
+                          fontSize: tinyFontSize, color: PdfColors.grey600)),
+                ])),
+          ])),
+    ]);
+  }
+
   if (!isPro) {
     widgets.addAll([
       pw.SizedBox(height: 6),

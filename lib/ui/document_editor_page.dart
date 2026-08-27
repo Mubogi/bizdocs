@@ -11,6 +11,7 @@ import 'signature_page.dart';
 import 'outbox_page.dart';
 import 'pdf_preview_page.dart';
 import 'scan_page.dart';
+import '../thermal_print.dart' as thermal;
 
 class DocumentEditorPage extends StatefulWidget {
   final Business business;
@@ -372,6 +373,68 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
     }
   }
 
+  Future<void> _thermalPrint() async {
+    if (_doc == null) return;
+    setState(() => _busy = true);
+    try {
+      final sig = await AppDatabase.instance.getSignature(_doc!.id);
+      final error = await thermal.printThermalReceipt(
+          business: widget.business,
+          customer: _customer,
+          doc: _doc!,
+          items: _items,
+          signerName: sig?.signerName);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error ?? 'Sent to printer: ${_doc!.docNumber}')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editFiscalDetails() async {
+    if (_doc == null) return;
+    final fdnCtrl = TextEditingController(text: _doc!.fdn ?? '');
+    final vcCtrl = TextEditingController(text: _doc!.verificationCode ?? '');
+    final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+              title: const Text('EFRIS fiscal details'),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text(
+                    'After fiscalizing this document on the URA portal, enter the details it gave you. A QR code and FDN will print on the PDF.'),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: fdnCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Fiscal Document Number (FDN)')),
+                const SizedBox(height: 8),
+                TextField(
+                    controller: vcCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Verification code (optional)')),
+              ]),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Save')),
+              ],
+            ));
+    if (ok != true) return;
+    final fdn = fdnCtrl.text.trim();
+    if (fdn.isEmpty) return;
+    await AppDatabase.instance.setFiscalDetails(
+        _doc!.id, fdn, vcCtrl.text.trim().isEmpty ? null : vcCtrl.text.trim());
+    await _reloadDoc();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Fiscal details saved. Re-send the PDF to share the QR.')));
+    }
+  }
+
   Future<void> _createReminder() async {
     if (_doc == null) return;
     final paid = await AppDatabase.instance.totalPaid(_doc!.id);
@@ -443,6 +506,16 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
                 icon: const Icon(Icons.preview),
                 tooltip: 'Preview PDF',
                 onPressed: () => _buildAndPreviewPdf()),
+          if (doc != null && doc.locked)
+            IconButton(
+                icon: const Icon(Icons.print),
+                tooltip: 'Print to thermal printer',
+                onPressed: _thermalPrint),
+          if (doc != null && doc.locked)
+            IconButton(
+                icon: const Icon(Icons.qr_code),
+                tooltip: 'EFRIS fiscal details',
+                onPressed: _editFiscalDetails),
           if (doc != null && doc.locked)
             IconButton(
                 icon: const Icon(Icons.ios_share),

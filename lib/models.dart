@@ -266,6 +266,8 @@ class Document {
   String? hash;
   String? terms;
   String? attachmentsJson;
+  String? fdn;
+  String? verificationCode;
   bool locked;
   int createdAt;
   int updatedAt;
@@ -279,7 +281,8 @@ class Document {
     this.discountTotal = 0, this.chargeTotal = 0,
     this.total = 0, this.currency = 'UGX', this.convertTo,
     this.issueDate2, this.linkedDocId, this.pdfPath, this.hash,
-    this.terms, this.attachmentsJson, this.locked = false,
+    this.terms, this.attachmentsJson, this.fdn, this.verificationCode,
+    this.locked = false,
     required this.createdAt, required this.updatedAt, this.synced = false,
   });
 
@@ -303,6 +306,8 @@ class Document {
         pdfPath: m['pdf_path'] as String?, hash: m['hash'] as String?,
         terms: m['terms'] as String?,
         attachmentsJson: m['attachments_json'] as String?,
+        fdn: m['fdn'] as String?,
+        verificationCode: m['verification_code'] as String?,
         locked: (m['locked'] as int?) == 1,
         createdAt: m['created_at'] as int, updatedAt: m['updated_at'] as int,
         synced: (m['synced'] as int?) == 1,
@@ -318,6 +323,7 @@ class Document {
         'pdf_path': pdfPath, 'hash': hash,
         'linked_doc_id': linkedDocId,
         'terms': terms, 'attachments_json': attachmentsJson,
+        'fdn': fdn, 'verification_code': verificationCode,
         'locked': locked ? 1 : 0,
         'created_at': createdAt, 'updated_at': updatedAt,
         'synced': synced ? 1 : 0,

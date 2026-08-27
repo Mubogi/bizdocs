@@ -5,7 +5,7 @@ import 'ui/documents_page.dart';
 import 'ui/customers_page.dart';
 import 'ui/products_page.dart';
 import 'ui/more_page.dart';
-import 'ui/business_setup_page.dart';
+import 'ui/onboarding_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,11 +50,12 @@ class _HomeShellState extends State<HomeShell> {
     final b = await AppDatabase.instance.getBusiness();
     if (!mounted) return;
     if (b == null) {
-      final created = await Navigator.of(context).push<Business?>(
-          MaterialPageRoute(builder: (_) => const BusinessSetupPage()),
-          );
-      if (created != null) _business = created;
-      if (created == null) return;
+      final done = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => const OnboardingPage()));
+      if (done == true) {
+        _business = await AppDatabase.instance.getBusiness();
+      }
+      if (_business == null) return;
     } else {
       _business = b;
     }

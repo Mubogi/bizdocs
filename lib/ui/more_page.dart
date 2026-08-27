@@ -228,7 +228,7 @@ class _MorePageState extends State<MorePage> {
         const AboutListTile(
             icon: Icon(Icons.info_outline),
             applicationName: 'BizDocs',
-            applicationVersion: '1.2.1',
+            applicationVersion: '1.3.0',
             aboutBoxChildren: [
               Text('Offline-first invoicing, receipts, quotations and letters for SMEs.'),
             ]),

@@ -14,7 +14,7 @@ class AppDatabase {
   Future<Database> get db async {
     _db ??= await openDatabase(
       join(await getDatabasesPath(), 'bizdocs.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, v) async => _createSchema(db),
       onUpgrade: (db, oldVersion, newVersion) async {
         final alters = <String>[
@@ -41,6 +41,8 @@ class AppDatabase {
           "ALTER TABLE documents ADD COLUMN attachments_json TEXT",
           "ALTER TABLE document_items ADD COLUMN discount_percent REAL",
           "ALTER TABLE document_items ADD COLUMN discount_amount INTEGER",
+          "ALTER TABLE documents ADD COLUMN fdn TEXT",
+          "ALTER TABLE documents ADD COLUMN verification_code TEXT",
         ];
         for (final a in alters) {
           try {
@@ -179,6 +181,8 @@ CREATE TABLE documents (
   convert_to TEXT,
   terms TEXT,
   attachments_json TEXT,
+  fdn TEXT,
+  verification_code TEXT,
   pdf_path TEXT,
   hash TEXT,
   linked_doc_id TEXT,
@@ -584,6 +588,20 @@ CREATE TABLE settings (
         {'pdf_path': pdfPath, 'hash': hash, 'updated_at': DateTime.now().millisecondsSinceEpoch},
         where: 'id = ?',
         whereArgs: [docId]);
+  }
+
+  Future<void> setFiscalDetails(
+      String docId, String fdn, String? verificationCode) async {
+    await (await db).update(
+        'documents',
+        {
+          'fdn': fdn,
+          'verification_code': verificationCode,
+          'updated_at': DateTime.now().millisecondsSinceEpoch
+        },
+        where: 'id = ?',
+        whereArgs: [docId]);
+    await audit(docId, 'FISCALIZED', 'fdn=$fdn');
   }
 
   // ------------------ Payments ------------------
