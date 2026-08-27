@@ -47,10 +47,27 @@ const Map<String, Map<String, String>> _pdfStrings = {
 
 String _tr(String label, String lang) => _pdfStrings[lang]?[label] ?? label;
 
+enum PdfLayout { classic, modern, elegant, minimal }
+
 class PdfTheme {
   final int accent;
-  PdfTheme({this.accent = 0xFF0F7A3D});
+  final PdfLayout layout;
+  PdfTheme({this.accent = 0xFF0F7A3D, this.layout = PdfLayout.classic});
 }
+
+const Map<PdfLayout, String> pdfLayoutNames = {
+  PdfLayout.classic: 'Classic',
+  PdfLayout.modern: 'Modern+',
+  PdfLayout.elegant: 'Elegant',
+  PdfLayout.minimal: 'Minimal',
+};
+
+const Map<PdfLayout, String> pdfLayoutDescriptions = {
+  PdfLayout.classic: 'The standard professional layout. Free forever.',
+  PdfLayout.modern: 'Bold accent header band, big total panel.',
+  PdfLayout.elegant: 'Centered letterhead, fine rules, premium feel.',
+  PdfLayout.minimal: 'Maximum whitespace, monochrome with one accent.',
+};
 
 PdfColor _lighten(PdfColor c, double amount) {
   return PdfColor(
@@ -63,8 +80,13 @@ PdfTheme _theme(Business b) {
   if (b.templateJson == null) return PdfTheme();
   try {
     final j = jsonDecode(b.templateJson!) as Map<String, dynamic>;
+    final layoutName = j['layout'] as String?;
     return PdfTheme(
-        accent: (j['accent'] as num?)?.toInt() ?? 0xFF0F7A3D);
+        accent: (j['accent'] as num?)?.toInt() ?? 0xFF0F7A3D,
+        layout: layoutName == null
+            ? PdfLayout.classic
+            : PdfLayout.values.firstWhere((e) => e.name == layoutName,
+                orElse: () => PdfLayout.classic));
   } catch (_) {
     return PdfTheme();
   }
@@ -122,59 +144,115 @@ Future<Uint8List> documentPdfBytes({
       '${business.merchantCode != null && business.merchantCode!.isNotEmpty ? ' (Merchant code: ${business.merchantCode})' : ''}',
   ].whereType<String>().toList();
 
-  final widgets = <pw.Widget>[
-    // Header
-    pw.Container(
-      padding: pw.EdgeInsets.all(isMinimalLayout ? 6 : 12),
-      decoration: isMinimalLayout
-          ? null
-          : pw.BoxDecoration(
-              color: accent, borderRadius: pw.BorderRadius.circular(4)),
-      child: pw.Row(
+  pw.Widget businessBlock({bool lightText = false}) {
+    final color = lightText ? PdfColors.white : PdfColors.black;
+    final sub = lightText ? PdfColors.white : PdfColors.grey700;
+    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      if (logo != null)
+        pw.Container(
+            margin: const pw.EdgeInsets.only(bottom: 6),
+            height: isMinimalLayout ? 24 : 48,
+            child: pw.Image(pw.MemoryImage(logo))),
+      if (logo == null)
+        pw.Text(business.name,
+            style: pw.TextStyle(
+                fontSize: headingFontSize, fontWeight: pw.FontWeight.bold,
+                color: color)),
+      if (business.tin != null && business.tin!.isNotEmpty)
+        pw.Text('TIN: ${business.tin}',
+            style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+      if (business.address != null && business.address!.isNotEmpty)
+        pw.Text(business.address!,
+            style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+      if (business.phone != null && business.phone!.isNotEmpty)
+        pw.Text('Tel: ${business.phone}',
+            style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+      if (business.email != null && business.email!.isNotEmpty)
+        pw.Text(business.email!,
+            style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+    ]);
+  }
+
+  pw.Widget docMetaBlock({bool lightText = false}) {
+    final color = lightText ? PdfColors.white : PdfColors.black;
+    final sub = lightText ? PdfColors.white : PdfColors.grey700;
+    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+      pw.Text(_tr(docTypeLabel(doc.docType), business.language).toUpperCase(),
+          style: pw.TextStyle(
+              fontSize: isMinimalLayout ? 11 : (isQuotation ? 16 : 18),
+              fontWeight: pw.FontWeight.bold,
+              color: color)),
+      pw.SizedBox(height: 3),
+      pw.Text(doc.docNumber,
+          style: pw.TextStyle(fontSize: baseFontSize, color: color)),
+      pw.Text(df.format(DateTime.fromMillisecondsSinceEpoch(doc.issueDate)),
+          style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+      if (doc.dueDate != null)
+        pw.Text('Due: ${df.format(DateTime.fromMillisecondsSinceEpoch(doc.dueDate!))}',
+            style: pw.TextStyle(fontSize: smallFontSize, color: sub)),
+    ]);
+  }
+
+  pw.Widget header;
+  switch (theme.layout) {
+    case PdfLayout.modern:
+      header = pw.Container(
+        decoration: pw.BoxDecoration(
+            color: accent,
+            borderRadius: pw.BorderRadius.only(
+                bottomLeft: const pw.Radius.circular(18),
+                bottomRight: const pw.Radius.circular(18))),
+        padding: pw.EdgeInsets.symmetric(
+            horizontal: isMinimalLayout ? 8 : 16,
+            vertical: isMinimalLayout ? 8 : 14),
+        child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Expanded(child: businessBlock(lightText: true)),
+              docMetaBlock(lightText: true),
+            ]),
+      );
+      break;
+    case PdfLayout.elegant:
+      header = pw.Column(children: [
+        pw.Center(child: businessBlock()),
+        pw.SizedBox(height: 6),
+        pw.Container(height: 2, color: accent, width: double.infinity),
+        pw.SizedBox(height: 2),
+        pw.Container(height: 0.5, color: accent, width: double.infinity),
+        pw.SizedBox(height: 8),
+        pw.Center(child: docMetaBlock()),
+      ]);
+      break;
+    case PdfLayout.minimal:
+      header = pw.Row(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Expanded(child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              if (logo != null)
-                pw.Container(
-                    margin: const pw.EdgeInsets.only(bottom: 6),
-                    height: isMinimalLayout ? 24 : 48,
-                    child: pw.Image(pw.MemoryImage(logo))),
-              if (logo == null)
-                pw.Text(business.name,
-                    style: pw.TextStyle(
-                        fontSize: headingFontSize, fontWeight: pw.FontWeight.bold,
-                        color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              if (business.tin != null && business.tin!.isNotEmpty)
-                pw.Text('TIN: ${business.tin}',
-                    style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              if (business.address != null && business.address!.isNotEmpty)
-                pw.Text(business.address!,
-                    style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              if (business.phone != null && business.phone!.isNotEmpty)
-                pw.Text('Tel: ${business.phone}',
-                    style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              if (business.email != null && business.email!.isNotEmpty)
-                pw.Text(business.email!,
-                    style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-            ])),
-            pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-              pw.Text(_tr(docTypeLabel(doc.docType), business.language).toUpperCase(),
-                  style: pw.TextStyle(
-                      fontSize: isMinimalLayout ? 11 : (isQuotation ? 16 : 18),
-                      fontWeight: pw.FontWeight.bold,
-                      color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              pw.SizedBox(height: 3),
-              pw.Text(doc.docNumber,
-                  style: pw.TextStyle(fontSize: baseFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              pw.Text(df.format(DateTime.fromMillisecondsSinceEpoch(doc.issueDate)),
-                  style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
-              if (doc.dueDate != null)
-                pw.Text('Due: ${df.format(DateTime.fromMillisecondsSinceEpoch(doc.dueDate!))}',
-                    style: pw.TextStyle(fontSize: smallFontSize, color: isMinimalLayout ? PdfColors.black : PdfColors.white)),
+            pw.Expanded(child: businessBlock()),
+            docMetaBlock(),
+          ]);
+      break;
+    case PdfLayout.classic:
+      header = pw.Container(
+        padding: pw.EdgeInsets.all(isMinimalLayout ? 6 : 12),
+        decoration: isMinimalLayout
+            ? null
+            : pw.BoxDecoration(
+                color: accent, borderRadius: pw.BorderRadius.circular(4)),
+        child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Expanded(child: businessBlock(lightText: !isMinimalLayout)),
+              docMetaBlock(lightText: !isMinimalLayout),
             ]),
-          ]),
-    ),
+      );
+  }
+
+  final widgets = <pw.Widget>[
+    header,
     pw.SizedBox(height: isMinimalLayout ? 6 : 14),
     // Bill To
     if (!isLetter && customer != null) ...[
@@ -458,6 +536,14 @@ Future<Uint8List> documentPdfBytes({
           child: pw.Text(
               'Generated with BizDocs - upgrade to Pro to remove this.',
               style: pw.TextStyle(fontSize: tinyFontSize, color: PdfColors.grey500))),
+    ]);
+  } else {
+    widgets.addAll([
+      pw.SizedBox(height: 4),
+      pw.Center(
+          child: pw.Text('Made in Uganda · BizDocs by JD Hub',
+              style: pw.TextStyle(
+                  fontSize: tinyFontSize, color: PdfColors.grey400))),
     ]);
   }
 

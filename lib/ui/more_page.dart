@@ -10,6 +10,9 @@ import '../models.dart';
 import 'business_setup_page.dart';
 import 'outbox_page.dart';
 import 'reports_page.dart';
+import '../pro_codes.dart';
+import 'pro_page.dart';
+import 'admin_codes_page.dart';
 
 class MorePage extends StatefulWidget {
   final Business business;
@@ -59,18 +62,35 @@ class _MorePageState extends State<MorePage> {
               ],
             ));
     if (ok != true) return;
-    final code = codeCtrl.text.trim().toUpperCase();
-    if (code == 'BIZPRO-2026') {
-      final valid = DateTime.now().add(const Duration(days: 365)).millisecondsSinceEpoch;
+    final code = codeCtrl.text.trim();
+    int? valid;
+    if (isLegacyCode(code)) {
+      valid = DateTime.now().add(const Duration(days: 365)).millisecondsSinceEpoch;
+    } else {
+      final v = validateProCode(code);
+      if (v != null) valid = int.parse(v.split('|').first);
+    }
+    if (valid != null) {
+      if (valid < DateTime.now().millisecondsSinceEpoch) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('That code has expired.')));
+        }
+        return;
+      }
       await AppDatabase.instance.setSubscription(SubscriptionState(
-          plan: 'PRO', validUntil: valid, provider: 'LOCAL_CODE', lastVerifiedAt: DateTime.now().millisecondsSinceEpoch));
+          plan: 'PRO',
+          validUntil: valid,
+          provider: 'CODE',
+          lastVerifiedAt: DateTime.now().millisecondsSinceEpoch));
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Pro unlocked for 12 months.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Pro unlocked. Enjoy the premium templates!')));
         _refresh();
       }
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid code.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Invalid code.')));
     }
   }
 
@@ -209,12 +229,19 @@ class _MorePageState extends State<MorePage> {
             title: const Text('Send queue'),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const OutboxPage()))),
         ListTile(
-            leading: const Icon(Icons.workspace_premium),
+            leading: Icon(Icons.workspace_premium,
+                color: _sub.isPro
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.tertiary),
             title: Text(_sub.isPro ? 'BizDocs Pro' : 'Upgrade to Pro'),
             subtitle: Text(_sub.isPro
                 ? 'Active${_sub.validUntil != null ? ' until ${DateFormat('dd MMM yyyy').format(DateTime.fromMillisecondsSinceEpoch(_sub.validUntil!))}' : ''}'
-                : 'Remove watermark, unlock month-end close, reports'),
-            onTap: _subscriptionDialog),
+                : 'Premium templates, no watermark, month lock'),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => ProPage(isPro: _sub.isPro, onUnlock: () {
+                  _subscriptionDialog();
+                  _refresh();
+                })))),
         ListTile(
             leading: Icon(Icons.lock_clock, color: _sub.isPro ? null : Colors.grey),
             title: const Text('Lock the month'),
@@ -225,13 +252,29 @@ class _MorePageState extends State<MorePage> {
             title: const Text('Audit log'),
             subtitle: const Text('Document lifecycle events'),
             onTap: _auditLog),
-        const AboutListTile(
-            icon: Icon(Icons.info_outline),
-            applicationName: 'BizDocs',
-            applicationVersion: '1.3.0',
-            aboutBoxChildren: [
-              Text('Offline-first invoicing, receipts, quotations and letters for SMEs.'),
-            ]),
+        ListTile(
+            leading: const Icon(Icons.vpn_key_outlined),
+            title: const Text('Pro code admin (JD Hub)'),
+            subtitle: const Text('Generate & export unlock codes'),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AdminCodesPage()))),
+        const Divider(),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Made in Uganda by', style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(height: 4),
+            Text('Jordan Design Hub (JD Hub)',
+                style: Theme.of(context).textTheme.titleMedium),
+            Text('Mubogi Gastavas Jordan Tech Ecosystem',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Text('jordandesignhub@gmail.com · +256 754 687 597',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            Text('BizDocs 1.4.0 · part of the Mubogi ecosystem',
+                style: Theme.of(context).textTheme.labelSmall),
+          ])),
       ]),
     );
   }

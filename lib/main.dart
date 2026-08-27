@@ -6,11 +6,21 @@ import 'ui/customers_page.dart';
 import 'ui/products_page.dart';
 import 'ui/more_page.dart';
 import 'ui/onboarding_page.dart';
+import 'ui/dashboard_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const BizDocsApp());
 }
+
+final _lightScheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF0F7A3D),
+    secondary: const Color(0xFF7C3AED));
+
+final _darkScheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF0F7A3D),
+    brightness: Brightness.dark,
+    secondary: const Color(0xFF7C3AED));
 
 class BizDocsApp extends StatelessWidget {
   const BizDocsApp({super.key});
@@ -21,9 +31,20 @@ class BizDocsApp extends StatelessWidget {
       title: 'BizDocs',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0F7A3D)),
+        colorScheme: _lightScheme,
         useMaterial3: true,
+        appBarTheme: AppBarTheme(
+            backgroundColor: _lightScheme.surface,
+            foregroundColor: _lightScheme.onSurface,
+            elevation: 0),
       ),
+      darkTheme: ThemeData(
+          colorScheme: _darkScheme,
+          useMaterial3: true,
+          appBarTheme: AppBarTheme(
+              backgroundColor: _darkScheme.surface,
+              foregroundColor: _darkScheme.onSurface,
+              elevation: 0)),
       home: const HomeShell(),
     );
   }
@@ -68,6 +89,7 @@ class _HomeShellState extends State<HomeShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final pages = [
+      DashboardPage(business: _business!),
       DocumentsPage(business: _business!),
       CustomersPage(business: _business!),
       ProductsPage(business: _business!),
@@ -79,6 +101,7 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
+          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.description_outlined), label: 'Docs'),
           NavigationDestination(icon: Icon(Icons.people_outlined), label: 'Customers'),
           NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Products'),

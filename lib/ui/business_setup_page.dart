@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
+import '../pdf_doc.dart' show PdfLayout, pdfLayoutNames, pdfLayoutDescriptions;
 import '../models.dart';
 
 class BusinessSetupPage extends StatefulWidget {
@@ -36,6 +37,8 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
   String _language = 'en';
 
   int _accent = 0xFF0F7A3D; // green default
+  PdfLayout _layout = PdfLayout.classic;
+  bool _isPro = false;
 
   @override
   void initState() {
@@ -61,10 +64,19 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
       _language = b.language;
       if (b.templateJson != null) {
         try {
-          _accent = (jsonDecode(b.templateJson!)['accent'] as num?)?.toInt() ?? _accent;
+          final j = jsonDecode(b.templateJson!);
+          _accent = (j['accent'] as num?)?.toInt() ?? _accent;
+          final l = j['layout'] as String?;
+          if (l != null) {
+            _layout = PdfLayout.values.firstWhere((e) => e.name == l,
+                orElse: () => PdfLayout.classic);
+          }
         } catch (_) {}
       }
     }
+    AppDatabase.instance.subscription().then((s) {
+      if (mounted) setState(() => _isPro = s.isPro);
+    });
   }
 
   @override
@@ -114,7 +126,7 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           _merchantCode.text.trim().isEmpty ? null : _merchantCode.text.trim(),
       termsTemplate: _terms.text.trim().isEmpty ? null : _terms.text.trim(),
       language: _language,
-      templateJson: jsonEncode({'accent': _accent}),
+      templateJson: jsonEncode({'accent': _accent, 'layout': _layout.name}),
       currency: _currency.text.trim().isEmpty ? 'UGX' : _currency.text.trim(),
       defaultTaxPercent: double.tryParse(_tax.text.trim()) ?? 0,
       createdAt: ex?.createdAt ?? now,
@@ -175,7 +187,7 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
               keyboardType: const TextInputType.numberWithOptions(decimal: true)),
           const SizedBox(height: 8),
           Row(children: [
-            const Text('Template color: '),
+            const Text('Accent color: '),
             ..._accents.map((c) => GestureDetector(
                 onTap: () => setState(() => _accent = c),
                 child: Container(
@@ -185,6 +197,36 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
                         border: Border.all(
                             color: _accent == c ? Colors.black : Colors.transparent, width: 3))))),
           ]),
+          const SizedBox(height: 16),
+          Text('Document design',
+              style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          ...PdfLayout.values.map((l) {
+            final locked = l != PdfLayout.classic && !_isPro;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: RadioListTile<PdfLayout>(
+                  value: l,
+                  groupValue: _layout,
+                  onChanged: locked ? null : (v) => setState(() => _layout = v!),
+                  title: Row(children: [
+                    Text(pdfLayoutNames[l]!),
+                    if (l == PdfLayout.classic) ...[
+                      const SizedBox(width: 8),
+                      const Chip(label: Text('FREE'), visualDensity: VisualDensity.compact),
+                    ],
+                    if (locked) ...[
+                      const SizedBox(width: 8),
+                      Chip(
+                          avatar: const Icon(Icons.lock, size: 14),
+                          label: const Text('PRO'),
+                          visualDensity: VisualDensity.compact,
+                          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer),
+                    ],
+                  ]),
+                  subtitle: Text(pdfLayoutDescriptions[l]!)),
+            );
+          }),
           const SizedBox(height: 16),
           _section(context, 'Payment details (invoice footer)'),
           TextFormField(controller: _bankName,
