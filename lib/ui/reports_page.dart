@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:sqflite/sqflite.dart' show ConflictAlgorithm;
 import '../db/database.dart';
 import '../models.dart';
 
@@ -670,6 +672,53 @@ class BackupPage extends StatelessWidget {
     }
   }
 
+  Future<void> _restoreJson(BuildContext context) async {
+    final picked = await FilePicker.pickFiles(
+        type: FileType.custom, allowedExtensions: ['json']);
+    if (picked.isEmpty || picked.single.path == null) return;
+    Map<String, dynamic> dump;
+    try {
+      dump = jsonDecode(await File(picked.single.path!).readAsString())
+          as Map<String, dynamic>;
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('That file is not a valid BizDocs backup.')));
+      }
+      return;
+    }
+    if (dump['business'] == null || dump['customers'] == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('That file is not a valid BizDocs backup.')));
+      }
+      return;
+    }
+    final db = await AppDatabase.instance.db;
+    var restored = 0;
+    await db.transaction((txn) async {
+      // Order matters: business first, then children.
+      await txn.insert('businesses', dump['business'] as Map<String, dynamic>,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+      for (final table in [
+        'customers', 'products', 'documents', 'document_items', 'payments', 'expenses'
+      ]) {
+        final rows = dump[table];
+        if (rows is! List) continue;
+        for (final row in rows) {
+          await txn.insert(table, Map<String, dynamic>.from(row as Map),
+              conflictAlgorithm: ConflictAlgorithm.replace);
+          restored++;
+        }
+      }
+    });
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Restored $restored records. Restart the app to see everything.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -681,6 +730,12 @@ class BackupPage extends StatelessWidget {
             subtitle: const Text(
                 'Everything: business, customers, products, documents, payments, expenses'),
             onTap: () => _exportJson(context)),
+        ListTile(
+            leading: const Icon(Icons.restore),
+            title: const Text('Restore backup (JSON)'),
+            subtitle: const Text(
+                'Bring back your data after reinstalling or changing phone'),
+            onTap: () => _restoreJson(context)),
         ListTile(
             leading: const Icon(Icons.table_chart_outlined),
             title: const Text('Documents (CSV)'),

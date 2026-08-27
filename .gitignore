@@ -8,3 +8,8 @@ build/
 *.iml
 android/
 local.properties
+
+# Signing secrets — never commit
+android/key.properties
+*.jks
+*.keystore
