@@ -13,7 +13,9 @@ class DocumentsPage extends StatefulWidget {
 
 class _DocumentsPageState extends State<DocumentsPage> {
   DocType? _filter;
+  String _search = '';
   List<Document> _docs = [];
+  final _searchCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -21,9 +23,27 @@ class _DocumentsPageState extends State<DocumentsPage> {
     _refresh();
   }
 
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _refresh() async {
-    final docs = await AppDatabase.instance.listDocuments(widget.business.id, type: _filter);
+    final docs = await AppDatabase.instance
+        .listDocuments(widget.business.id, type: _filter);
     if (mounted) setState(() => _docs = docs);
+  }
+
+  List<Document> get _visible {
+    if (_search.isEmpty) return _docs;
+    final q = _search.toLowerCase();
+    return _docs
+        .where((d) =>
+            d.docNumber.toLowerCase().contains(q) ||
+            docTypeLabel(d.docType).toLowerCase().contains(q) ||
+            d.status.toLowerCase().contains(q))
+        .toList();
   }
 
   Future<void> _create() async {
@@ -112,14 +132,40 @@ class _DocumentsPageState extends State<DocumentsPage> {
           ),
         ),
       ),
-      body: _docs.isEmpty
-          ? const Center(child: Text('No documents yet. Tap + to create.'))
-          : RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView.builder(
-                  itemCount: _docs.length,
-                  itemBuilder: (_, i) {
-                    final d = _docs[i];
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _search = v),
+              decoration: InputDecoration(
+                  hintText: 'Search number, type or status…',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _search.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _search = '');
+                          }),
+                  filled: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none))),
+        ),
+        Expanded(
+            child: _visible.isEmpty
+                ? Center(
+                    child: Text(_docs.isEmpty
+                        ? 'No documents yet. Tap + to create.'
+                        : 'Nothing matches "$_search".'))
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.builder(
+                        itemCount: _visible.length,
+                        itemBuilder: (_, i) {
+                          final d = _visible[i];
                     return ListTile(
                       leading: CircleAvatar(child: Text(d.docNumber.split('-').first)),
                       title: Text(d.docNumber),
@@ -140,7 +186,10 @@ class _DocumentsPageState extends State<DocumentsPage> {
                       },
                     );
                   })),
-      floatingActionButton: FloatingActionButton(onPressed: _create, child: const Icon(Icons.add)),
+        ),
+      ]),
+      floatingActionButton:
+          FloatingActionButton(onPressed: _create, child: const Icon(Icons.add)),
     );
   }
 }

@@ -589,11 +589,19 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
                   decoration: BoxDecoration(
                       color: Theme.of(context).colorScheme.surfaceContainerHighest),
                   child: Row(children: [
-                    Expanded(
-                        child: Text(
-                            'Total: ${widget.business.currency} $total',
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold))),
+                    if (!_isLetter)
+                      Expanded(
+                          child: Text(
+                              'Total: ${widget.business.currency} $total',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)))
+                    else
+                      Expanded(
+                          child: Text(
+                              _isLocked
+                                  ? 'Signed · share or print from the top bar'
+                                  : 'Write the letter, then press Issue & Sign below',
+                              style: Theme.of(context).textTheme.bodySmall)),
                     if (!_isLetter && !_isLocked)
                       ElevatedButton.icon(
                           onPressed: doc == null
@@ -601,6 +609,11 @@ class _DocumentEditorPageState extends State<DocumentEditorPage> {
                               : _addItem,
                           icon: const Icon(Icons.add),
                           label: Text(doc == null ? 'Start' : 'Add item')),
+                    if (_isLetter && !_isLocked)
+                      ElevatedButton.icon(
+                          onPressed: _busy ? null : _sign,
+                          icon: const Icon(Icons.gesture),
+                          label: const Text('Issue & Sign')),
                   ])),
             ]),
       bottomNavigationBar: SafeArea(

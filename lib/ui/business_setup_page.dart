@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
-import '../pdf_doc.dart' show PdfLayout, pdfLayoutNames, pdfLayoutDescriptions;
+import '../pdf_doc.dart' show PdfLayout, pdfLayoutNames, pdfLayoutDescriptions, pdfLayoutIsPro;
 import '../models.dart';
 
 class BusinessSetupPage extends StatefulWidget {
@@ -202,7 +202,8 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
               style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 8),
           ...PdfLayout.values.map((l) {
-            final locked = l != PdfLayout.classic && !_isPro;
+            final isFree = !(pdfLayoutIsPro[l] ?? true);
+            final locked = !isFree && !_isPro;
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: RadioListTile<PdfLayout>(
@@ -211,7 +212,7 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
                   onChanged: locked ? null : (v) => setState(() => _layout = v!),
                   title: Row(children: [
                     Text(pdfLayoutNames[l]!),
-                    if (l == PdfLayout.classic) ...[
+                    if (isFree) ...[
                       const SizedBox(width: 8),
                       const Chip(label: Text('FREE'), visualDensity: VisualDensity.compact),
                     ],
@@ -224,7 +225,7 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
                           backgroundColor: Theme.of(context).colorScheme.tertiaryContainer),
                     ],
                   ]),
-                  subtitle: Text(pdfLayoutDescriptions[l]!)),
+                  subtitle: Text(pdfLayoutDescriptions[l] ?? '')),
             );
           }),
           const SizedBox(height: 16),
