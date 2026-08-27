@@ -6,7 +6,9 @@ build/
 .idea/
 .vscode/
 *.iml
-android/
+android/app/build/
+android/.gradle/
+android/local.properties
 local.properties
 
 # Signing secrets — never commit
