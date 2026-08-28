@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:path_provider/path_provider.dart';
 import '../db/database.dart';
-import '../pdf_doc.dart' show PdfLayout, pdfLayoutNames, pdfLayoutDescriptions, pdfLayoutIsPro;
+import '../pdf_doc.dart'
+    show PdfLayout;
+import '../pdf_layouts.dart' show layoutColors;
 import '../models.dart';
+import 'template_gallery.dart';
 
 class BusinessSetupPage extends StatefulWidget {
   final Business? existing;
@@ -38,7 +41,6 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
 
   int _accent = 0xFF0F7A3D; // green default
   PdfLayout _layout = PdfLayout.classic;
-  bool _isPro = false;
 
   @override
   void initState() {
@@ -74,9 +76,6 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
         } catch (_) {}
       }
     }
-    AppDatabase.instance.subscription().then((s) {
-      if (mounted) setState(() => _isPro = s.isPro);
-    });
   }
 
   @override
@@ -126,7 +125,11 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           _merchantCode.text.trim().isEmpty ? null : _merchantCode.text.trim(),
       termsTemplate: _terms.text.trim().isEmpty ? null : _terms.text.trim(),
       language: _language,
-      templateJson: jsonEncode({'accent': _accent, 'layout': _layout.name}),
+      templateJson: jsonEncode({
+        'accent': _accent,
+        'accent2': layoutColors(_layout).$2,
+        'layout': _layout.name,
+      }),
       currency: _currency.text.trim().isEmpty ? 'UGX' : _currency.text.trim(),
       defaultTaxPercent: double.tryParse(_tax.text.trim()) ?? 0,
       createdAt: ex?.createdAt ?? now,
@@ -200,34 +203,23 @@ class _BusinessSetupPageState extends State<BusinessSetupPage> {
           const SizedBox(height: 16),
           Text('Document design',
               style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          ...PdfLayout.values.map((l) {
-            final isFree = !(pdfLayoutIsPro[l] ?? true);
-            final locked = !isFree && !_isPro;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: RadioListTile<PdfLayout>(
-                  value: l,
-                  groupValue: _layout,
-                  onChanged: locked ? null : (v) => setState(() => _layout = v!),
-                  title: Row(children: [
-                    Text(pdfLayoutNames[l]!),
-                    if (isFree) ...[
-                      const SizedBox(width: 8),
-                      const Chip(label: Text('FREE'), visualDensity: VisualDensity.compact),
-                    ],
-                    if (locked) ...[
-                      const SizedBox(width: 8),
-                      Chip(
-                          avatar: const Icon(Icons.lock, size: 14),
-                          label: const Text('PRO'),
-                          visualDensity: VisualDensity.compact,
-                          backgroundColor: Theme.of(context).colorScheme.tertiaryContainer),
-                    ],
-                  ]),
-                  subtitle: Text(pdfLayoutDescriptions[l] ?? '')),
-            );
-          }),
+          const SizedBox(height: 4),
+          Text('Tap a design to preview and choose it. Locked ones need Pro.',
+              style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 12),
+          TemplateGallery(
+              business: Business(
+                  id: widget.existing?.id ?? 'preview',
+                  name: _name.text.isEmpty ? 'Your Business' : _name.text,
+                  createdAt: 0,
+                  updatedAt: 0),
+              selected: _layout,
+              onSelect: (l) {
+                setState(() {
+                  _layout = l;
+                  _accent = layoutColors(l).$1;
+                });
+              }),
           const SizedBox(height: 16),
           _section(context, 'Payment details (invoice footer)'),
           TextFormField(controller: _bankName,

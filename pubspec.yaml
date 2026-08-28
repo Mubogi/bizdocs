@@ -1,7 +1,7 @@
 name: bizdocs
 description: BizDocs — offline-first invoicing, receipts, quotations and letters for SMEs.
 publish_to: 'none'
-version: 1.5.0+7
+version: 1.6.0+8
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

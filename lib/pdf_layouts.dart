@@ -112,8 +112,40 @@ const Map<PdfLayout, String> pdfLayoutDescriptions = {
 
 class PdfTheme {
   final int accent;
+  final int accent2;
   final PdfLayout layout;
-  PdfTheme({this.accent = 0xFF0F7A3D, this.layout = PdfLayout.classic});
+  PdfTheme(
+      {this.accent = 0xFF0F7A3D,
+      this.accent2 = 0xFF7C3AED,
+      this.layout = PdfLayout.classic});
+}
+
+/// Gradient/pattern color pair for a layout (used by previews and PDFs).
+(int, int) layoutColors(PdfLayout l) {
+  switch (l) {
+    case PdfLayout.gradient:      return (0xFF0F7A3D, 0xFF7C3AED);
+    case PdfLayout.navy:          return (0xFF1E3A8A, 0xFF3B82F6);
+    case PdfLayout.framedGold:    return (0xFFB8860B, 0xFFD4AF37);
+    case PdfLayout.twoToneSplit:  return (0xFF0F7A3D, 0xFF34D399);
+    case PdfLayout.geometric:     return (0xFF7C3AED, 0xFFEC4899);
+    case PdfLayout.footerBanner:  return (0xFF0891B2, 0xFF22D3EE);
+    case PdfLayout.modernBlue:    return (0xFF2563EB, 0xFF60A5FA);
+    case PdfLayout.simpleGreen:   return (0xFF059669, 0xFF34D399);
+    case PdfLayout.modern:        return (0xFF0F7A3D, 0xFF84CC16);
+    case PdfLayout.sideBand:      return (0xFF7C2D12, 0xFFEA580C);
+    case PdfLayout.bigPrice:      return (0xFFDC2626, 0xFFF59E0B);
+    case PdfLayout.accentBar:     return (0xFFDB2777, 0xFFF472B6);
+    case PdfLayout.boldStationary:return (0xFF4338CA, 0xFF818CF8);
+    case PdfLayout.twoColumn:     return (0xFF0F7A3D, 0xFF65A30D);
+    case PdfLayout.script:        return (0xFF6D28D9, 0xFFA78BFA);
+    case PdfLayout.roundedCard:   return (0xFF0891B2, 0xFF67E8F9);
+    case PdfLayout.boldType:      return (0xFF111827, 0xFF4B5563);
+    case PdfLayout.elegant:       return (0xFF78350F, 0xFFB45309);
+    case PdfLayout.minimal:       return (0xFF374151, 0xFF9CA3AF);
+    case PdfLayout.scandinavian:  return (0xFF0F766E, 0xFF5EEAD4);
+    case PdfLayout.monochrome:    return (0xFF000000, 0xFF525252);
+    case PdfLayout.classic:       return (0xFF0F7A3D, 0xFF34D399);
+  }
 }
 
 PdfTheme themeFrom(Business b) {
@@ -121,12 +153,15 @@ PdfTheme themeFrom(Business b) {
   try {
     final j = jsonDecode(b.templateJson!) as Map<String, dynamic>;
     final layoutName = j['layout'] as String?;
+    final layout = layoutName == null
+        ? PdfLayout.classic
+        : PdfLayout.values.firstWhere((e) => e.name == layoutName,
+            orElse: () => PdfLayout.classic);
+    final (a1, a2) = layoutColors(layout);
     return PdfTheme(
-        accent: (j['accent'] as num?)?.toInt() ?? 0xFF0F7A3D,
-        layout: layoutName == null
-            ? PdfLayout.classic
-            : PdfLayout.values.firstWhere((e) => e.name == layoutName,
-                orElse: () => PdfLayout.classic));
+        accent: (j['accent'] as num?)?.toInt() ?? a1,
+        accent2: (j['accent2'] as num?)?.toInt() ?? a2,
+        layout: layout);
   } catch (_) {
     return PdfTheme();
   }
@@ -147,6 +182,7 @@ class _Ctx {
   final bool isPro;
   final PdfTheme theme;
   final PdfColor accent;
+  final PdfColor accent2;
   final bool narrow;
 
   _Ctx({
@@ -161,6 +197,7 @@ class _Ctx {
     required this.isPro,
     required this.theme,
     required this.accent,
+    required this.accent2,
     required this.narrow,
   });
 
@@ -537,6 +574,7 @@ Future<Uint8List> renderDocument({
       isPro: isPro,
       theme: theme,
       accent: accent,
+      accent2: PdfColor.fromInt(theme.accent2),
       narrow: narrow);
 
   final pageFormat = narrow
@@ -729,10 +767,10 @@ List<pw.Widget> _sideBand(_Ctx c) => [
 List<pw.Widget> _gradient(_Ctx c) => [
       pw.Container(
           decoration: pw.BoxDecoration(
-              gradient: pw.LinearGradient(colors: [
-                c.accent,
-                _lighten(c.accent, 0.3),
-              ]),
+              gradient: pw.LinearGradient(
+                  colors: [c.accent, c.accent2],
+                  begin: pw.Alignment.topLeft,
+                  end: pw.Alignment.bottomRight),
               borderRadius: pw.BorderRadius.circular(6)),
           padding: pw.EdgeInsets.all(c.narrow ? 6 : 14),
           child: pw.Row(
@@ -851,7 +889,7 @@ List<pw.Widget> _geometric(_Ctx c) => [
       pw.SizedBox(height: 4),
       pw.Row(children: [
         pw.Container(width: 40, height: 8, color: c.accent),
-        pw.Container(width: 20, height: 8, color: _lighten(c.accent, 0.4)),
+        pw.Container(width: 24, height: 8, color: c.accent2),
         pw.Container(width: 60, height: 8, color: _lighten(c.accent, 0.7)),
       ]),
       pw.SizedBox(height: c.narrow ? 6 : 14),
